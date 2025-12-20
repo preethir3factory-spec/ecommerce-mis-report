@@ -854,7 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (apiStatus) apiStatus.textContent = "Generating Excel...";
 
         try {
-            const response = await fetch('http://localhost:3000/api/generate-excel', {
+            const response = await fetch('https://ecommerce-mis-report.onrender.com/api/generate-excel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ rows: rows })
@@ -898,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     try {
                         // Send to local server for conversion
-                        const resp = await fetch('http://localhost:3000/api/convert-excel', {
+                        const resp = await fetch('https://ecommerce-mis-report.onrender.com/api/convert-excel', {
                             method: 'POST',
                             body: formData
                         });
@@ -1076,7 +1076,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (token && cid && sec) {
                 try {
                     apiStatusDiv.textContent = "Syncing Amazon...";
-                    const response = await fetch('http://localhost:3000/api/fetch-sales', {
+                    const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1147,7 +1147,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (nBiz && nToken) {
                 try {
                     apiStatusDiv.textContent = "Syncing Noon...";
-                    const response = await fetch('http://localhost:3000/api/fetch-noon-sales', {
+                    const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
