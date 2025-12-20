@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.querySelectorAll('.tab');
     const dateBtns = document.querySelectorAll('.date-btn');
     const downloadBtn = document.getElementById('download-btn');
-    const resetBtn = document.getElementById('reset-btn');
+    const resetBtn = document.getElementById('resetBtn');
 
     // --- Persistence Logic ---
     function loadData() {
@@ -1236,6 +1236,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 chrome.tabs.create({ url: 'explore.html' });
             } else {
                 alert('Explore Dashboard is only available in the extension environment.');
+            }
+        });
+    }
+
+    // Reset Data Listener
+    if (resetBtn) {
+        resetBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (confirm('This will purge all saved data and force a full re-sync. Proceed?')) {
+                chrome.storage.local.clear(() => {
+                    location.reload();
+                });
             }
         });
     }
