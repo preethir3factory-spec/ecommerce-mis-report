@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIS Analytics Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f9fafb;
+            --bg-gradient: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
+            --text-color: #373A36;
+            --card-bg: #ffffff;
+            --primary: #43B02A;
+            /* Brand Green */
+            --primary-light: #6bc958;
+            --success: #10b981;
+            --danger: #ef4444;
+            --font-family: 'Outfit', sans-serif;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #111827;
+                --bg-gradient: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+                --text-color: #f9fafb;
+                --card-bg: #1f2937;
+                --border-color: #374151;
+            }
+        }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--bg-gradient);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+        }
+
+        .grid-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border-top: 4px solid var(--primary);
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
+
+        .stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+
+        .chart-container {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            height: 400px;
+            position: relative;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .table-container {
+            flex: 1;
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #374151;
+        }
+
+        th {
+            color: #9ca3af;
+            font-weight: 600;
+        }
+
+        .header-btn {
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .header-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="dashboard-container">
+        <header>
+            <div style="display:flex; align-items:center; gap:20px;">
+                <h1>Explore MIS Analytics</h1>
+                <a href="https://dashboard.r3factory.com/dashboard" target="_blank" class="header-btn">
+                    R3 Dashboard
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                </a>
+            </div>
+            <div>Data Source: <span id="data-status">Loading...</span></div>
+        </header>
+
+        <!-- Key Metrics -->
+        <div class="grid-cards">
+            <div class="stat-card">
+                <h3>Total Sales (All Time)</h3>
+                <div class="value" id="total-sales">--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Net Margin</h3>
+                <div class="value" id="total-margin">--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Noon Sales Share</h3>
+                <div class="value" id="noon-share">--</div>
+            </div>
+            <div class="stat-card">
+                <h3>Amazon Sales Share</h3>
+                <div class="value" id="amazon-share">--</div>
+            </div>
+        </div>
+
+        <!-- Main Chart -->
+        <div class="chart-container">
+            <h2 style="margin-top:0;">Sales Trend (Daily)</h2>
+            <canvas id="salesChart"></canvas>
+        </div>
+
+        <!-- Detailed Table -->
+        <div class="flex-row">
+            <div class="table-container">
+                <h2>Recent Orders</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Platform</th>
+                            <th>Order ID</th>
+                            <th>Status</th>
+                            <th>Amount</th>
+                            <th>Fees</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-table-body">
+                        <!-- JS Injected -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="explore.js"></script>
+</body>
+
+</html>

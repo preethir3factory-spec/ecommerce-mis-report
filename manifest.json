@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "E-commerce MIS Report",
+  "version": "1.0",
+  "description": "Daily sales report including cost, margin, listed products, and sold products for Amazon and Noon.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "E-commerce MIS Report"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.amazon.com/*",
+    "https://*.noon.com/*"
+  ]
+}

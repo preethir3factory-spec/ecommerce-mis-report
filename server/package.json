@@ -1,0 +1,22 @@
+{
+    "name": "mis-report-backend",
+    "version": "1.0.0",
+    "description": "Local server for Amazon SP-API connectivity",
+    "main": "server.js",
+    "dependencies": {
+        "aws4": "^1.13.2",
+        "axios": "^1.6.2",
+        "axios-cookiejar-support": "^6.0.5",
+        "cors": "^2.8.5",
+        "crypto-js": "^4.2.0",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
+        "jsonwebtoken": "^9.0.3",
+        "multer": "^2.0.2",
+        "tough-cookie": "^6.0.0",
+        "xlsx": "^0.18.5"
+    },
+    "scripts": {
+        "start": "node server.js"
+    }
+}

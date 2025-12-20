@@ -1,0 +1,24 @@
+# Environment files with sensitive data
+server/.env
+
+# Node modules
+node_modules/
+server/node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+
+server/noon_credentials.json
