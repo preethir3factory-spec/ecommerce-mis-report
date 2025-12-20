@@ -168,11 +168,14 @@ app.post('/api/fetch-sales', async (req, res) => {
                     let estimatedCost = 0;
                     let actualFee = null;
 
-                    // Fetch Actual Fees ONLY for Today/Yesterday to save API calls
-                    // (Amazon Finance API is throttled)
-                    if (orderDate >= yesterdayStart) {
+                    // Fetch Actual Fees for Last 365 Days
+                    // WARNING: This will be very slow for many orders due to API Throttling
+                    const lookbackDate = new Date(todayStart);
+                    lookbackDate.setDate(lookbackDate.getDate() - 365);
+
+                    if (orderDate >= lookbackDate) {
                         try {
-                            await new Promise(r => setTimeout(r, 1500)); // Rate Limit spacing
+                            await new Promise(r => setTimeout(r, 1000)); // Rate Limit spacing (1s)
                             const finances = await getFinancials(o.AmazonOrderId, accessToken);
                             if (finances !== null && !isNaN(finances)) actualFee = finances;
                             console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
