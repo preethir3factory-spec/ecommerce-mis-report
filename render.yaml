@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ecommerce-mis-report
+    env: node
+    region: ohio
+    plan: free
+    repo: https://github.com/preethir3factory-spec/ecommerce-mis-report 
+    rootDirectory: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
