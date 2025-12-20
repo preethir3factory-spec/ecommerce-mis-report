@@ -158,22 +158,40 @@ app.post('/api/fetch-sales', async (req, res) => {
             let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0;
             const ordersList = [];
 
-            orders.forEach(o => {
+            // Process Orders Sequentially to handle Async Financial fetching
+            for (const o of orders) {
                 if (o.OrderTotal && o.OrderTotal.Amount) {
                     const amount = parseFloat(o.OrderTotal.Amount);
                     const orderDate = new Date(o.PurchaseDate);
 
                     let estimatedFee = 0;
                     let estimatedCost = 0;
+                    let actualFee = null;
+
+                    // Fetch Actual Fees ONLY for Today/Yesterday to save API calls
+                    // (Amazon Finance API is throttled)
+                    if (orderDate >= yesterdayStart) {
+                        try {
+                            await new Promise(r => setTimeout(r, 1500)); // Rate Limit spacing
+                            const finances = await getFinancials(o.AmazonOrderId, accessToken);
+                            if (finances !== null && !isNaN(finances)) actualFee = finances;
+                            console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
+                        } catch (e) {
+                            console.warn(`   Failed to fetch fees for ${o.AmazonOrderId} (${e.message})`);
+                        }
+                    }
+
+                    if (actualFee !== null) {
+                        estimatedFee = actualFee;
+                    } else {
+                        // Fallback Estimation (Adjusted based on standard electronics rate ~8-15%)
+                        // User screenshot suggests ~8.3% (60/724)
+                        estimatedFee = amount * 0.15;
+                    }
 
                     if (amount >= 0) {
                         allSales += amount;
-                        estimatedFee = amount * 0.15;
                         allFees += estimatedFee;
-
-                        estimatedCost = 0;
-                        allCost += estimatedCost;
-
                         allCount++;
 
                         if (orderDate >= todayStart) {
@@ -196,7 +214,34 @@ app.post('/api/fetch-sales', async (req, res) => {
                         currency: o.OrderTotal.CurrencyCode
                     });
                 }
-            });
+            }
+
+            // Helper for Financials
+            async function getFinancials(orderId, token) {
+                const fOpts = {
+                    service: 'execute-api', region: AWS_REGION, method: 'GET',
+                    host: host, path: `/finances/v0/orders/${orderId}/financialEvents`,
+                    headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
+                };
+                aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+                const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 3, 2000);
+                const events = fRes.data.payload.FinancialEvents;
+                let totalFees = 0;
+
+                if (events.ShipmentEventList) {
+                    events.ShipmentEventList.forEach(ship => {
+                        ship.ShipmentItemList.forEach(item => {
+                            if (item.ItemFeeList) {
+                                item.ItemFeeList.forEach(fee => {
+                                    totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
+                                });
+                            }
+                        });
+                    });
+                }
+                return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
+            }
 
             res.json({
                 success: true,
