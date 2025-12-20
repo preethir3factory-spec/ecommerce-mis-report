@@ -167,9 +167,10 @@ app.post('/api/fetch-sales', async (req, res) => {
                     let estimatedFee = 0;
                     let estimatedCost = 0;
                     let actualFee = null;
+                    let feeType = 'Estimated';
+                    let feeError = null;
 
                     // Fetch Actual Fees for Last 365 Days
-                    // WARNING: This will be very slow for many orders due to API Throttling
                     const lookbackDate = new Date(todayStart);
                     lookbackDate.setDate(lookbackDate.getDate() - 365);
 
@@ -177,19 +178,24 @@ app.post('/api/fetch-sales', async (req, res) => {
                         try {
                             await new Promise(r => setTimeout(r, 1000)); // Rate Limit spacing (1s)
                             const finances = await getFinancials(o.AmazonOrderId, accessToken);
-                            if (finances !== null && !isNaN(finances)) actualFee = finances;
+                            if (finances !== null && !isNaN(finances)) {
+                                actualFee = finances;
+                                feeType = 'Actual';
+                            } else {
+                                feeError = 'No financial events found';
+                            }
                             console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
                         } catch (e) {
                             console.warn(`   Failed to fetch fees for ${o.AmazonOrderId} (${e.message})`);
+                            feeError = e.message;
                         }
                     }
 
                     if (actualFee !== null) {
                         estimatedFee = actualFee;
                     } else {
-                        // Fallback Estimation (Adjusted based on standard electronics rate ~8-15%)
-                        // User screenshot suggests ~8.3% (60/724)
-                        estimatedFee = amount * 0.15;
+                        // Fallback Estimation updated to 10% (User data suggests ~8-9%)
+                        estimatedFee = amount * 0.10;
                     }
 
                     if (amount >= 0) {
@@ -214,7 +220,9 @@ app.post('/api/fetch-sales', async (req, res) => {
                         fees: estimatedFee,
                         cost: estimatedCost,
                         status: o.OrderStatus,
-                        currency: o.OrderTotal.CurrencyCode
+                        currency: o.OrderTotal.CurrencyCode,
+                        feeType: feeType,
+                        feeError: feeError
                     });
                 }
             }
