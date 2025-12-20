@@ -194,8 +194,16 @@ app.post('/api/fetch-sales', async (req, res) => {
                     if (actualFee !== null) {
                         estimatedFee = actualFee;
                     } else {
-                        // Fallback Estimation updated to 10% (User data suggests ~8-9%)
-                        estimatedFee = amount * 0.10;
+                        // Smart Fallback based on User Hint:
+                        // FBA (AFN) = 5%, FBM (MFN) = 6%
+                        const channel = o.FulfillmentChannel || 'MFN';
+                        if (channel === 'AFN') {
+                            estimatedFee = amount * 0.05;
+                            feeType = 'Est (FBA)';
+                        } else {
+                            estimatedFee = amount * 0.06;
+                            feeType = 'Est (FBM)';
+                        }
                     }
 
                     if (amount >= 0) {
