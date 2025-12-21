@@ -180,13 +180,14 @@ app.post('/api/fetch-sales', async (req, res) => {
                 let feeType = 'Estimated';
                 let feeError = null;
 
-                // Fetch Actual Fees for Last 30 Days (To prevent timeout on historical data)
+                // Fetch Actual Fees for Last 365 Days
                 const lookbackDate = new Date(todayStart);
-                lookbackDate.setDate(lookbackDate.getDate() - 30);
+                lookbackDate.setDate(lookbackDate.getDate() - 365);
 
                 if (orderDate >= lookbackDate) {
                     try {
-                        await new Promise(r => setTimeout(r, 1000)); // Rate Limit spacing (1s)
+                        // Slower Throttling to prevent 429 Errors and ensure Actuals
+                        await new Promise(r => setTimeout(r, 2000));
                         const finances = await getFinancials(o.AmazonOrderId, accessToken);
                         if (finances !== null && !isNaN(finances)) {
                             actualFee = finances;
