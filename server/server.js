@@ -268,7 +268,8 @@ app.post('/api/fetch-sales', async (req, res) => {
                             });
                         }
                     });
-                });
+                }
+                );
             }
             return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
         }
@@ -288,16 +289,100 @@ app.post('/api/fetch-sales', async (req, res) => {
                 },
                 all: {
                     sales: allSales, orders: allCount,
-                    fees: allFees, cost: allCost, returns: allReturns,
-                    status: `Synced (${allCount})`
+                    fees: allFees, cost: allCost, returns: allReturns
                 },
                 ordersList: ordersList
             }
         });
 
-    } catch (error) {
-        console.error("\n❌ Amazon Error:", error.response?.data || error.message);
-        res.status(500).json({ error: error.message });
+    } catch (apiErr) {
+        console.error("Amazon API Error:", apiErr);
+        throw apiErr;
+    }
+
+} catch (err) {
+    console.error("Fetch Error:", err.message);
+    res.status(500).json({ error: err.message, log: err.stack });
+}
+});
+
+// 3. Refresh Fees Endpoint (For Retry Mechanism)
+app.post('/api/refresh-fees', async (req, res) => {
+    const { refreshToken, clientId, clientSecret, orderIds } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.json({ success: true, data: [] });
+    }
+
+    try {
+        console.log(`\n🔄 Retrying Fees for ${orderIds.length} orders...`);
+        // Auth Exchange
+        const axios = require('axios');
+        const lwaResp = await axios.post('https://api.amazon.com/auth/o2/token', new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            client_id: clientId,
+            client_secret: clientSecret
+        }));
+        const accessToken = lwaResp.data.access_token;
+        const aws4 = require('aws4');
+
+        const updatedOrders = [];
+
+        // Helper reused
+        async function getFinancials(orderId, token) {
+            const fOpts = {
+                service: 'execute-api', region: AWS_REGION, method: 'GET',
+                host: 'sellingpartnerapi-eu.amazon.com', path: `/finances/v0/orders/${orderId}/financialEvents`,
+                headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
+            };
+            aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+            // Strong Retry for Individual Fetch
+            const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 5, 2000);
+            const events = fRes.data.payload.FinancialEvents;
+            let totalFees = 0;
+            if (events.ShipmentEventList) {
+                events.ShipmentEventList.forEach(ship => {
+                    ship.ShipmentItemList.forEach(item => {
+                        if (item.ItemFeeList) {
+                            item.ItemFeeList.forEach(fee => {
+                                totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
+                            });
+                        }
+                    });
+                });
+            }
+            return Math.abs(totalFees);
+        }
+
+        // Process Loop (Throttled)
+        for (const id of orderIds) {
+            try {
+                await new Promise(r => setTimeout(r, 2000)); // Respect Rate Limits
+                const actualFee = await getFinancials(id, accessToken);
+                console.log(`   ✅ Refreshed Fee for ${id}: ${actualFee}`);
+                updatedOrders.push({
+                    id: id,
+                    fees: actualFee,
+                    feeType: 'Actual',
+                    feeError: null
+                });
+            } catch (e) {
+                console.warn(`   ❌ Failed Retry for ${id}: ${e.message}`);
+                updatedOrders.push({
+                    id: id,
+                    feeType: 'Estimated', // Still failed
+                    feeError: e.message
+                });
+            }
+        }
+
+        res.json({ success: true, data: updatedOrders });
+
+    } catch (err) {
+        console.error("Refresh Logic Error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
