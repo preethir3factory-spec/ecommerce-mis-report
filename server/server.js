@@ -73,8 +73,19 @@ app.post('/api/fetch-sales', async (req, res) => {
     const { refreshToken, clientId, clientSecret, marketplaceId, dateRange } = req.body;
     const targetMarketplaceId = marketplaceId || 'A2VIGQ35RCS4UG';
 
-    if (!refreshToken || !AWS_ACCESS_KEY) {
-        return res.status(400).json({ error: 'Missing Credentials' });
+    if (!refreshToken) {
+        return res.status(400).json({ error: 'Missing Refresh Token (Extension Settings)' });
+    }
+
+    // Server-Side Credentials Check
+    if (!AWS_ACCESS_KEY || !AWS_SECRET_KEY) {
+        console.error("❌ Config Error: AWS_ACCESS_KEY or AWS_SECRET_KEY missing in server environment.");
+        return res.status(500).json({ error: 'Server Config Error: IAM Keys Missing in Environment' });
+    }
+
+    if (AWS_ACCESS_KEY.includes('your_aws_access_key') || AWS_ACCESS_KEY.includes('AKIA...') || AWS_SECRET_KEY.includes('your_aws_secret_key')) {
+        console.error("❌ Config Error: AWS Keys are default placeholders.");
+        return res.status(500).json({ error: 'Server Config Error: IAM Keys are placeholders. Update .env or Render Vars.' });
     }
 
     try {
@@ -87,205 +98,201 @@ app.post('/api/fetch-sales', async (req, res) => {
         }));
         const accessToken = lwaResp.data.access_token;
 
-        if (AWS_ACCESS_KEY && AWS_SECRET_KEY && !AWS_ACCESS_KEY.includes('AKIA...')) {
-            const aws4 = require('aws4');
-            const now = new Date();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const yesterdayStart = new Date(todayStart);
-            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+        const aws4 = require('aws4');
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
-            let createdAfter;
-            if (dateRange === '1year') {
-                createdAfter = new Date(now);
-                createdAfter.setFullYear(createdAfter.getFullYear() - 1);
-            } else {
-                createdAfter = yesterdayStart;
-            }
-
-            const host = 'sellingpartnerapi-eu.amazon.com';
-            const opts = {
-                service: 'execute-api',
-                region: AWS_REGION,
-                method: 'GET',
-                host: host,
-                path: `/orders/v0/orders?CreatedAfter=${createdAfter.toISOString()}&MarketplaceIds=${targetMarketplaceId}`,
-                headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
-            };
-
-            aws4.sign(opts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-            let orders = [];
-            try {
-                // Initial Fetch with Retry
-                let currentResp = await fetchWithRetry(`https://${opts.host}${opts.path}`, { headers: opts.headers });
-                orders = currentResp.data.payload.Orders || [];
-                let nextToken = currentResp.data.payload.NextToken;
-                let pageCount = 0;
-
-                // Pagination Loop (Max 50 pages ~5000 orders)
-                while (nextToken && pageCount < 50) {
-                    console.log(`   ... Fetching Page ${pageCount + 2}`);
-                    const nextOpts = {
-                        service: 'execute-api',
-                        region: AWS_REGION,
-                        method: 'GET',
-                        host: host,
-                        path: `/orders/v0/orders?NextToken=${encodeURIComponent(nextToken)}`,
-                        headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
-                    };
-                    aws4.sign(nextOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-                    // Retryable Fetch with more resilience
-                    const nextResp = await fetchWithRetry(`https://${nextOpts.host}${nextOpts.path}`, { headers: nextOpts.headers }, 5, 2000);
-                    const nextOrders = nextResp.data.payload.Orders || [];
-                    orders = orders.concat(nextOrders);
-                    nextToken = nextResp.data.payload.NextToken;
-                    pageCount++;
-
-                    // Throttling: Wait 2 seconds between pages to respect Amazon Leaky Bucket
-                    // Restores burst capacity 
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-                console.log(`   Total Orders Fetched: ${orders.length}`);
-
-            } catch (err) {
-                console.error("   Pagination Error (showing partial):", err.message);
-                if (orders.length === 0) throw err;
-            }
-
-            let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0;
-            let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0;
-            let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0;
-            const ordersList = [];
-
-            // Process Orders Sequentially to handle Async Financial fetching
-            for (const o of orders) {
-                if (o.OrderTotal && o.OrderTotal.Amount) {
-                    const amount = parseFloat(o.OrderTotal.Amount);
-                    const orderDate = new Date(o.PurchaseDate);
-
-                    let estimatedFee = 0;
-                    let estimatedCost = 0;
-                    let actualFee = null;
-                    let feeType = 'Estimated';
-                    let feeError = null;
-
-                    // Fetch Actual Fees for Last 365 Days
-                    const lookbackDate = new Date(todayStart);
-                    lookbackDate.setDate(lookbackDate.getDate() - 365);
-
-                    if (orderDate >= lookbackDate) {
-                        try {
-                            await new Promise(r => setTimeout(r, 1000)); // Rate Limit spacing (1s)
-                            const finances = await getFinancials(o.AmazonOrderId, accessToken);
-                            if (finances !== null && !isNaN(finances)) {
-                                actualFee = finances;
-                                feeType = 'Actual';
-                            } else {
-                                feeError = 'No financial events found';
-                            }
-                            console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
-                        } catch (e) {
-                            console.warn(`   Failed to fetch fees for ${o.AmazonOrderId} (${e.message})`);
-                            feeError = e.message;
-                        }
-                    }
-
-                    if (actualFee !== null) {
-                        estimatedFee = actualFee;
-                    } else {
-                        // Smart Fallback based on User Hint:
-                        // FBA (AFN) = 5%, FBM (MFN) = 6%
-                        const channel = o.FulfillmentChannel || 'MFN';
-                        if (channel === 'AFN') {
-                            estimatedFee = amount * 0.05;
-                            feeType = 'Est (FBA)';
-                        } else {
-                            estimatedFee = amount * 0.06;
-                            feeType = 'Est (FBM)';
-                        }
-                    }
-
-                    if (amount >= 0) {
-                        allSales += amount;
-                        allFees += estimatedFee;
-                        allCount++;
-
-                        if (orderDate >= todayStart) {
-                            todaySales += amount; todayCount++; todayFees += estimatedFee;
-                        }
-                        else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                            yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee;
-                        }
-                    } else {
-                        allReturns += Math.abs(amount);
-                    }
-
-                    ordersList.push({
-                        id: o.AmazonOrderId,
-                        date: o.PurchaseDate,
-                        amount: amount,
-                        fees: estimatedFee,
-                        cost: estimatedCost,
-                        status: o.OrderStatus,
-                        currency: o.OrderTotal.CurrencyCode,
-                        feeType: feeType,
-                        feeError: feeError
-                    });
-                }
-            }
-
-            // Helper for Financials
-            async function getFinancials(orderId, token) {
-                const fOpts = {
-                    service: 'execute-api', region: AWS_REGION, method: 'GET',
-                    host: host, path: `/finances/v0/orders/${orderId}/financialEvents`,
-                    headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
-                };
-                aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-                const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 3, 2000);
-                const events = fRes.data.payload.FinancialEvents;
-                let totalFees = 0;
-
-                if (events.ShipmentEventList) {
-                    events.ShipmentEventList.forEach(ship => {
-                        ship.ShipmentItemList.forEach(item => {
-                            if (item.ItemFeeList) {
-                                item.ItemFeeList.forEach(fee => {
-                                    totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
-                                });
-                            }
-                        });
-                    });
-                }
-                return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
-            }
-
-            res.json({
-                success: true,
-                data: {
-                    today: {
-                        sales: todaySales, orders: todayCount,
-                        fees: todayFees, cost: todayCost, returns: todayReturns,
-                        status: `Synced`
-                    },
-                    yesterday: {
-                        sales: yesterdaySales, orders: yesterdayCount,
-                        fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
-                        status: `Synced`
-                    },
-                    all: {
-                        sales: allSales, orders: allCount,
-                        fees: allFees, cost: allCost, returns: allReturns,
-                        status: `Synced (${allCount})`
-                    },
-                    ordersList: ordersList
-                }
-            });
-            return;
+        let createdAfter;
+        if (dateRange === '1year') {
+            createdAfter = new Date(now);
+            createdAfter.setFullYear(createdAfter.getFullYear() - 1);
+        } else {
+            createdAfter = yesterdayStart;
         }
-        res.json({ success: true, data: { today: { sales: 0, orders: 0, status: "Connected (No Keys)" }, yesterday: { sales: 0, orders: 0, status: "Connected" }, all: { sales: 0, orders: 0, status: "Connected" }, ordersList: [] } });
+
+        const host = 'sellingpartnerapi-eu.amazon.com';
+        const opts = {
+            service: 'execute-api',
+            region: AWS_REGION,
+            method: 'GET',
+            host: host,
+            path: `/orders/v0/orders?CreatedAfter=${createdAfter.toISOString()}&MarketplaceIds=${targetMarketplaceId}`,
+            headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+        };
+
+        aws4.sign(opts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+        let orders = [];
+        try {
+            // Initial Fetch with Retry
+            let currentResp = await fetchWithRetry(`https://${opts.host}${opts.path}`, { headers: opts.headers });
+            orders = currentResp.data.payload.Orders || [];
+            let nextToken = currentResp.data.payload.NextToken;
+            let pageCount = 0;
+
+            // Pagination Loop (Max 50 pages ~5000 orders)
+            while (nextToken && pageCount < 50) {
+                console.log(`   ... Fetching Page ${pageCount + 2}`);
+                const nextOpts = {
+                    service: 'execute-api',
+                    region: AWS_REGION,
+                    method: 'GET',
+                    host: host,
+                    path: `/orders/v0/orders?NextToken=${encodeURIComponent(nextToken)}`,
+                    headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+                };
+                aws4.sign(nextOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+                // Retryable Fetch with more resilience
+                const nextResp = await fetchWithRetry(`https://${nextOpts.host}${nextOpts.path}`, { headers: nextOpts.headers }, 5, 2000);
+                const nextOrders = nextResp.data.payload.Orders || [];
+                orders = orders.concat(nextOrders);
+                nextToken = nextResp.data.payload.NextToken;
+                pageCount++;
+
+                // Throttling: Wait 2 seconds between pages to respect Amazon Leaky Bucket
+                // Restores burst capacity 
+                await new Promise(r => setTimeout(r, 2000));
+            }
+            console.log(`   Total Orders Fetched: ${orders.length}`);
+
+        } catch (err) {
+            console.error("   Pagination Error (showing partial):", err.message);
+            if (orders.length === 0) throw err;
+        }
+
+        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0;
+        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0;
+        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0;
+        const ordersList = [];
+
+        // Process Orders Sequentially to handle Async Financial fetching
+        for (const o of orders) {
+            if (o.OrderTotal && o.OrderTotal.Amount) {
+                const amount = parseFloat(o.OrderTotal.Amount);
+                const orderDate = new Date(o.PurchaseDate);
+
+                let estimatedFee = 0;
+                let estimatedCost = 0;
+                let actualFee = null;
+                let feeType = 'Estimated';
+                let feeError = null;
+
+                // Fetch Actual Fees for Last 30 Days (To prevent timeout on historical data)
+                const lookbackDate = new Date(todayStart);
+                lookbackDate.setDate(lookbackDate.getDate() - 30);
+
+                if (orderDate >= lookbackDate) {
+                    try {
+                        await new Promise(r => setTimeout(r, 1000)); // Rate Limit spacing (1s)
+                        const finances = await getFinancials(o.AmazonOrderId, accessToken);
+                        if (finances !== null && !isNaN(finances)) {
+                            actualFee = finances;
+                            feeType = 'Actual';
+                        } else {
+                            feeError = 'No financial events found';
+                        }
+                        console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
+                    } catch (e) {
+                        console.warn(`   Failed to fetch fees for ${o.AmazonOrderId} (${e.message})`);
+                        feeError = e.message;
+                    }
+                }
+
+                if (actualFee !== null) {
+                    estimatedFee = actualFee;
+                } else {
+                    // Smart Fallback based on User Hint:
+                    // FBA (AFN) = 5%, FBM (MFN) = 6%
+                    const channel = o.FulfillmentChannel || 'MFN';
+                    if (channel === 'AFN') {
+                        estimatedFee = amount * 0.05;
+                        feeType = 'Est (FBA)';
+                    } else {
+                        estimatedFee = amount * 0.06;
+                        feeType = 'Est (FBM)';
+                    }
+                }
+
+                if (amount >= 0) {
+                    allSales += amount;
+                    allFees += estimatedFee;
+                    allCount++;
+
+                    if (orderDate >= todayStart) {
+                        todaySales += amount; todayCount++; todayFees += estimatedFee;
+                    }
+                    else if (orderDate >= yesterdayStart && orderDate < todayStart) {
+                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee;
+                    }
+                } else {
+                    allReturns += Math.abs(amount);
+                }
+
+                ordersList.push({
+                    id: o.AmazonOrderId,
+                    date: o.PurchaseDate,
+                    amount: amount,
+                    fees: estimatedFee,
+                    cost: estimatedCost,
+                    status: o.OrderStatus,
+                    currency: o.OrderTotal.CurrencyCode,
+                    feeType: feeType,
+                    feeError: feeError
+                });
+            }
+        }
+
+        // Helper for Financials
+        async function getFinancials(orderId, token) {
+            const fOpts = {
+                service: 'execute-api', region: AWS_REGION, method: 'GET',
+                host: host, path: `/finances/v0/orders/${orderId}/financialEvents`,
+                headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
+            };
+            aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+            const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 3, 2000);
+            const events = fRes.data.payload.FinancialEvents;
+            let totalFees = 0;
+
+            if (events.ShipmentEventList) {
+                events.ShipmentEventList.forEach(ship => {
+                    ship.ShipmentItemList.forEach(item => {
+                        if (item.ItemFeeList) {
+                            item.ItemFeeList.forEach(fee => {
+                                totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
+                            });
+                        }
+                    });
+                });
+            }
+            return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
+        }
+
+        res.json({
+            success: true,
+            data: {
+                today: {
+                    sales: todaySales, orders: todayCount,
+                    fees: todayFees, cost: todayCost, returns: todayReturns,
+                    status: `Synced`
+                },
+                yesterday: {
+                    sales: yesterdaySales, orders: yesterdayCount,
+                    fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
+                    status: `Synced`
+                },
+                all: {
+                    sales: allSales, orders: allCount,
+                    fees: allFees, cost: allCost, returns: allReturns,
+                    status: `Synced (${allCount})`
+                },
+                ordersList: ordersList
+            }
+        });
 
     } catch (error) {
         console.error("\n❌ Amazon Error:", error.response?.data || error.message);
@@ -363,40 +370,71 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
 
         let orders = [];
         let statusMsg = "Synced";
+        const orderUrl = 'https://api.noon.partners/fbpi/v1/shipment/get';
 
         try {
-            // Try fetching orders from Gateway V1
-            // Removed status filter to get ALL orders
-            // Try fetching orders from User Provided Endpoint
-            // https://noon-api-gateway.noon.partners/order/v1/orders
-            // OR Direct API: https://api.noon.partners/order/v1/orders
+            let allNoonOrders = [];
+            let offset = 0;
+            const limit = 50;
+            let keepFetching = true;
+            let pageCount = 0;
+            const oneYearAgo = new Date();
+            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-            // We use FBPI Shipment API (POST)
-            const orderUrl = 'https://api.noon.partners/fbpi/v1/shipment/get';
-            console.log(`📡 Fetching Shipments from: ${orderUrl} (Bearer Auth - POST)`);
+            console.log(`📡 Fetching Shipments from: ${orderUrl} (Bearer Auth - POST) - Pagination Enabled`);
 
             // Credentials for Headers
             const userCode = creds.channel_identifier; // e.g. mukul@p47635...
 
-            const orderResponse = await client.post(orderUrl, {
-                // Request Body (Guessing common Filters)
-                "limit": 50,
-                "offset": 0,
-                "status": ["created", "packed", "ready_for_pickup", "picked_up", "shipped", "delivered"]
-            }, {
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "X-Partner-Id": userCode,
-                    "X-Request-Id": key_id,
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-                    "X-Locale": "en-AE",
-                    "Origin": "https://noon.partners",
-                    "Referer": "https://noon.partners/"
+            while (keepFetching && pageCount < 50) { // Max 2500 orders or 50 pages
+                console.log(`   ... Fetching Page ${pageCount + 1} (Offset: ${offset})`);
+
+                const orderResponse = await client.post(orderUrl, {
+                    "limit": limit,
+                    "offset": offset,
+                    "status": ["created", "packed", "ready_for_pickup", "picked_up", "shipped", "delivered"]
+                }, {
+                    headers: {
+                        "Authorization": `Bearer ${token}`,
+                        "X-Partner-Id": userCode,
+                        "X-Request-Id": key_id,
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+                        "X-Locale": "en-AE",
+                        "Origin": "https://noon.partners",
+                        "Referer": "https://noon.partners/"
+                    }
+                });
+
+                const batch = orderResponse.data.result || orderResponse.data || [];
+
+                if (!Array.isArray(batch) || batch.length === 0) {
+                    keepFetching = false;
+                } else {
+                    allNoonOrders = allNoonOrders.concat(batch);
+
+                    // Date Checking (Stop if we go back more than 1 year)
+                    const lastOrder = batch[batch.length - 1];
+                    const lastDateStr = lastOrder.order_created_at || lastOrder.order_date;
+                    if (lastDateStr) {
+                        const lastDate = new Date(lastDateStr);
+                        if (lastDate < oneYearAgo) {
+                            console.log(`   Stopped fetching: Reached orders older than 1 year (${lastDateStr})`);
+                            keepFetching = false;
+                        }
+                    }
+
+                    if (batch.length < limit) {
+                        keepFetching = false; // Last page
+                    }
+
+                    offset += limit;
+                    pageCount++;
+                    await new Promise(r => setTimeout(r, 500)); // 500ms delay between pages to be nice
                 }
-            });
-            orders = orderResponse.data.result || orderResponse.data || [];
+            }
+            orders = allNoonOrders;
             if (!Array.isArray(orders)) orders = []; // Safety check
             console.log(`✅ Noon Orders Retrieved: ${orders.length}`);
 

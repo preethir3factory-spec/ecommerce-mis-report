@@ -1,43 +1,37 @@
-# QA Test Report - E-Commerce MIS Extension
-**Date:** 2025-12-18
-**Status:** ✅ Partial Success (Backend Healthy, Authentication Working, API Access Restricted)
+# QA Report and Debugging Guide
 
----
+## Issue: Amazon Data Not Showing
+User reported that Amazon data was not appearing in the extension or dashboard.
 
-## 1. Backend Server Health
-| Component | Status | Notes |
-| :--- | :--- | :--- |
-| **Server Connectivity** | ✅ **PASS** | Server is listening on Port 3000. |
-| **Excel Generation** | ✅ **PASS** | `POST /api/generate-excel` correctly generates valid .xlsx files. |
-| **Static Assets** | ✅ **PASS** | Server serving default routes correctly. |
+### Diagnosis
+The backend server (`server.js`) had a logic flaw where missing or placeholder AWS credentials (`AWS_ACCESS_KEY`, `AWS_SECRET_KEY`) would result in a "Success" response with empty data (0 sales), instead of an error. This made it difficult to identify misconfiguration.
 
-## 2. API Integrations
+### Fix Applied
+1.  **Modified `server/server.js`**:
+    *   Added strict validation for server-side environment variables (`AWS_ACCESS_KEY`, `AWS_SECRET_KEY`).
+    *   Added checks to detect default placeholder values (e.g., `your_aws_access_key`, `AKIA...`).
+    *   Now returns a `500 Server Config Error` if keys are missing or invalid, allowing the extension to display a clear error message.
 
-### 🔵 Noon Integration
-| Feature | Status | Details |
-| :--- | :--- | :--- |
-| **Authentication** | ✅ **PASS** | JWT generation and Login via `noon-api-gateway` is successful using Key ID `49d3...`. |
-| **User Verification** | ✅ **PASS** | `WhoAmI` returns valid user `mukul@p47635...`. |
-| **Order Fetching** | ⚠️ **BLOCKED** | Endpoints (`v1/order`, `fbpi/v1/fbpi-order`) return `404` or `418`. This indicates the endpoint URL is incorrect or blocked by WAF. |
-| **Sync Status** | ✅ **VERIFIED** | App correctly reports "Connected - Access Restricted" instead of crashing. |
+2.  **Updated QA Test Runner**:
+    *   Modified `server/qa_test_runner.js` to include a local `.env` file check.
+    *   Added a specific test to probe the server's AWS configuration by sending a request that bypasses basic checks and targets the AWS credential validation logic.
 
-### 🟠 Amazon Integration
-| Feature | Status | Details |
-| :--- | :--- | :--- |
-| **Endpoint Structure** | ✅ **PASS** | `/api/fetch-sales` is active and handles invalid requests gracefully (400). |
-| **Data Logic** | ✅ **VERIFIED** | Code correctly handles Pagination, Rate Limits (Retry Logic), and Date Filtering. |
-| **Sync Status** | ❓ **USER CHECK** | Requires live credentials in UI. Verify "Amazon Synced" message in Extension. |
+### How to Run QA Tests
+To verify your installation and configuration:
 
-## 3. Frontend (Extension)
-| Feature | Status | Notes |
-| :--- | :--- | :--- |
-| **UI Rendering** | ✅ **PASS** | Verified fix for syntax error causing blank screen. |
-| **Error Handling** | ✅ **PASS** | Verified fix for "Amazon Error" crash. Errors are now displayed descriptively. |
-| **Data Display** | ✅ **PASS** | Logic for 'Today', 'Yesterday', and 'All Time' stats is implemented correctly. |
+1.  Open a terminal in the project root.
+2.  Ensure your local server is running in another terminal (`cd server && node server.js`).
+3.  Run the QA script:
+    ```bash
+    node server/qa_test_runner.js
+    ```
 
----
+### Expected Results
+*   **Test 0**: should PASS (if local `.env` is correct) or SKIP (if relying on Render vars).
+*   **Test 1 & 3**: should PASS (verifying server is up and Excel generation works).
+*   **Test 4 (Amazon Config)**: should PASS.
+    *   If it fails with "Server Misconfigured", check your `.env` file or Render Environment Variables for valid `AWS_ACCESS_KEY` and `AWS_SECRET_KEY`.
 
-## Recommended Next Steps
-1. **Noon**: Contact Noon Partner Support or check documentation for the correct **"Get Orders List"** endpoint URL for the API Gateway. The credentials are valid.
-2. **Amazon**: Ensure `Refresh Token`, `Client ID`, and `Secret` are saved in Settings. Click "Sync Live Data" to update.
-
+### Next Steps for Deployment
+*   **On Render.com**: Go to your Service -> Environment. Ensure `AWS_ACCESS_KEY` and `AWS_SECRET_KEY` are set to your *actual* IAM User credentials, not the placeholders.
+*   **In Extension**: Go to Settings -> Test API. You should now see either "✅ Amazon Synced" or a specific "❌ Amazon Error" telling you what is wrong.

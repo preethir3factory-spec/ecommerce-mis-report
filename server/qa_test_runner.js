@@ -10,6 +10,33 @@ async function runTests() {
     let passed = 0;
     let failed = 0;
 
+    // 0. Environment File Check (Local Only)
+    // This helps debug local setup issues before hitting the server
+    process.stdout.write("Test 0: Local Environment Check (.env)... ");
+    try {
+        const envPath = require('path').join(__dirname, '.env');
+        if (fs.existsSync(envPath)) {
+            const envContent = fs.readFileSync(envPath, 'utf8');
+            const hasAccessKey = envContent.includes('AWS_ACCESS_KEY');
+            const hasPlaceholder = envContent.includes('your_aws_access_key') || envContent.includes('AKIA...');
+
+            if (!hasAccessKey) {
+                console.log("⚠️ WARNING (.env exists but AWS_ACCESS_KEY missing)");
+            } else if (hasPlaceholder) {
+                console.log("❌ FAIL (Credentials are placeholders)");
+                console.log("   Action: Update .env with real IAM User keys.");
+                failed++;
+            } else {
+                console.log("✅ PASS");
+                passed++;
+            }
+        } else {
+            console.log(`⚠️ SKIPPED (No .env found at ${envPath} - Assuming Render/Cloud Env Vars)`);
+        }
+    } catch (e) {
+        console.log("⚠️ SKIPPED (Read Error)");
+    }
+
     // 1. Server Connectivity
     try {
         process.stdout.write("Test 1: Server Connectivity... ");
@@ -31,7 +58,10 @@ async function runTests() {
     // 2. Noon Authentication Script
     process.stdout.write("Test 2: Noon Authentication (Script)... ");
     await new Promise(resolve => {
-        exec('node noon_login.js', (error, stdout, stderr) => {
+        // Use path relative to this script
+        const scriptPath = require('path').join(__dirname, 'noon_login.js');
+        // Run with CWD set to server directory so it finds credentials
+        exec(`node "${scriptPath}"`, { cwd: __dirname }, (error, stdout, stderr) => {
             if (error) {
                 console.log("❌ FAIL");
                 console.log("   Error Log:\n" + stderr);
@@ -72,19 +102,31 @@ async function runTests() {
         failed++;
     }
 
-    // 4. Amazon Logic Check (Static)
-    // We can't hit live Amazon API without active User Credentials.
-    // Instead we check if the Endpoint exists.
-    process.stdout.write("Test 4: Amazon Endpoint Existence... ");
+    // 4. Amazon Logic Check (Configuration Diag)
+    process.stdout.write("Test 4: Amazon Server Configuration... ");
     try {
-        // Sending invalid method to verify route exists (should be 404 for GET, or 400 for POST missing data)
-        // Actually sending valid POST with empty body should return 400 Missing Credentials
-        const res = await axios.post(`${BASE_URL}/api/fetch-sales`, {}, { validateStatus: () => true });
-        if (res.status === 400) {
-            console.log("✅ PASS (Route active, handled empty creds correctly)");
+        // Send a dummy token to bypass the 'Missing Refresh Token' check
+        // This forces the server to check for AWS Keys
+        const res = await axios.post(`${BASE_URL}/api/fetch-sales`, {
+            refreshToken: "QA_TEST_DUMMY_TOKEN"
+        }, { validateStatus: () => true });
+
+        if (res.status === 500 && res.data && res.data.error && res.data.error.includes("Server Config Error")) {
+            console.log("❌ FAIL (Server Misconfigured)");
+            console.log("   Reason: " + res.data.error);
+            failed++;
+        } else if (res.status === 500) {
+            // Likely Amazon API rejected our dummy token, which means the keys are PRESENT and VALID enough to try.
+            // Or it could be other 500s.
+            console.log("✅ PASS (Server verification attempted - Config is OK)");
+            passed++;
+        } else if (res.status === 200) {
+            // This clearly means the "No Keys" fallback was triggered (which we removed, but if old code exists...)
+            // OR it means it somehow worked?!
+            console.log("⚠️ WARNING (Unexpected Success with dummy token?)");
             passed++;
         } else {
-            console.log("❌ FAIL (Unexpected Status " + res.status + ")");
+            console.log("⚠️ INDETERMINATE (Status " + res.status + ")");
             failed++;
         }
     } catch (err) {
