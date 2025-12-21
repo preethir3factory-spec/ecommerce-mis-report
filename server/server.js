@@ -295,15 +295,10 @@ app.post('/api/fetch-sales', async (req, res) => {
             }
         });
 
-    } catch (apiErr) {
-        console.error("Amazon API Error:", apiErr);
-        throw apiErr;
+    } catch (err) {
+        console.error("Fetch/Amazon API Error:", err.message);
+        res.status(500).json({ error: err.message, log: err.stack });
     }
-
-} catch (err) {
-    console.error("Fetch Error:", err.message);
-    res.status(500).json({ error: err.message, log: err.stack });
-}
 });
 
 // 3. Refresh Fees Endpoint (For Retry Mechanism)
