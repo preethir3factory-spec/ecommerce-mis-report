@@ -630,6 +630,181 @@ app.listen(PORT, () => {
     console.log(`---------------------------------------------------------`);
 });
 
+// --- MARKET TRENDS SCRAPER ---
+app.post('/api/fetch-market-trends', async (req, res) => {
+    const cheerio = require('cheerio');
+    const uaList = require('user-agent-array'); // We installed this
+
+    console.log("Starting Market Trend Scrape...");
+
+    const getRandomUA = () => {
+        // Fallback if the package fails or returns weird stuff
+        const fallback = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        ];
+        return (uaList && uaList.length > 0) ? uaList[Math.floor(Math.random() * uaList.length)] : fallback[0];
+    };
+
+    try {
+        const results = { amazon: [], noon: [] };
+
+        // 1. AMAZON SCRAPE
+        // Search: "Renewed Electronics", Sort: Review/Popularity if possible. 
+        // URL: Amazon UAE Search for "renewed electronics"
+        try {
+            console.log("   Fetching Amazon...");
+            // Use search alias 'electronics' and query 'renewed'. 
+            // 's=exact-aware-popularity-rank' attempts to sort by popularity.
+            const amzUrl = 'https://www.amazon.ae/s?k=renewed+electronics&i=electronics&s=exact-aware-popularity-rank';
+
+            const amzResp = await axios.get(amzUrl, {
+                headers: {
+                    'User-Agent': getRandomUA(),
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            });
+
+            const $ = cheerio.load(amzResp.data);
+
+            $('.s-result-item[data-component-type="s-search-result"]').each((i, el) => {
+                if (results.amazon.length >= 10) return;
+
+                const title = $(el).find('h2 span').text().trim();
+                if (!title) return;
+
+                // Price extraction (complex structure)
+                const priceWhole = $(el).find('.a-price-whole').first().text().replace('.', '').trim();
+                const priceFraction = $(el).find('.a-price-fraction').first().text().trim();
+                const price = priceWhole ? `AED ${priceWhole}.${priceFraction || '00'}` : 'N/A';
+
+                // Image
+                const image = $(el).find('.s-image').attr('src');
+
+                // Link
+                const linkSuffix = $(el).find('h2 a').attr('href');
+                const url = linkSuffix ? `https://www.amazon.ae${linkSuffix}` : '#';
+
+                // Rating
+                const rating = $(el).find('.a-icon-star-small .a-icon-alt').text().split(' ')[0] || 'N/A';
+                const reviews = $(el).find('.a-size-base.s-underline-text').text().replace(/[()]/g, '') || '0';
+
+                results.amazon.push({
+                    rank: i + 1,
+                    title: title,
+                    brand: title.split(' ')[0], // Best guess
+                    price: price,
+                    condition: 'Renewed',
+                    rating: rating,
+                    reviews: reviews,
+                    image: image,
+                    url: url,
+                    platform: 'Amazon'
+                });
+            });
+            console.log(`   Fetched ${results.amazon.length} Amazon items.`);
+
+        } catch (amzErr) {
+            console.error("   Amazon Scrape Failed:", amzErr.message);
+        }
+
+        // 2. NOON SCRAPE
+        // URL: Noon Renewed Mobile Phones (Most popular renewed category)
+        try {
+            console.log("   Fetching Noon...");
+            // Noon Refurbished listing page. 
+            // Note: Noon is often SPA (React), but they send hydration data in HTML we can sometimes parse, or just standard HTML for SEO.
+            const noonUrl = 'https://www.noon.com/uae-en/electronics-and-mobiles/renewed-products/';
+
+            const noonResp = await axios.get(noonUrl, {
+                headers: {
+                    'User-Agent': getRandomUA(),
+                    'Accept': 'text/html,application/xhtml+xml',
+                    'Referer': 'https://www.google.com/'
+                }
+            });
+
+            const $n = cheerio.load(noonResp.data);
+
+            // Noon selectors change often. Looking for common product styling classes or hydration JSON.
+            // Strategy: Look for Next.js hydration script if standard parsing fails.
+
+            let itemsFound = 0;
+
+            // Try standard grid selectors (generic usually works for SSR)
+            $('div[data-qa="product-grid"] > div').each((i, el) => {
+                if (itemsFound >= 10) return;
+
+                const title = $(el).find('[data-qa="product-name"]').text().trim();
+                if (!title) return; // Might be a banner
+
+                const price = $(el).find('[class*="amount"]').first().text().trim() || 'N/A';
+                const image = $(el).find('img').attr('src');
+                const urlSuffix = $(el).find('a').attr('href');
+                const url = urlSuffix ? `https://www.noon.com${urlSuffix}` : '#';
+
+                const ratingContainer = $(el).find('[class*="rating"]'); // generic check
+                const rating = ratingContainer.text().trim() || 'N/A';
+                const reviews = 'N/A'; // Noon listing page rarely shows review count clearly in markup without hover
+
+                results.noon.push({
+                    rank: itemsFound + 1,
+                    title: title,
+                    brand: title.split(' ')[0],
+                    price: `AED ${price}`,
+                    condition: 'Refurbished',
+                    rating: rating,
+                    reviews: reviews,
+                    image: image,
+                    url: url,
+                    platform: 'Noon'
+                });
+                itemsFound++;
+            });
+
+            // If HTML grid parsing failed (0 items), try Next.js JSON (Advanced)
+            if (itemsFound === 0) {
+                console.log("   Noon HTML grid empty, trying JSON extraction...");
+                const jsonScript = $('#__NEXT_DATA__').html();
+                if (jsonScript) {
+                    const jsonData = JSON.parse(jsonScript);
+                    // Navigate heavy object structure
+                    // Usually: props.pageProps.catalog.hits
+                    const hits = jsonData?.props?.pageProps?.catalog?.hits || [];
+
+                    hits.slice(0, 10).forEach((hit, i) => {
+                        results.noon.push({
+                            rank: i + 1,
+                            title: hit.name,
+                            brand: hit.brand,
+                            price: `AED ${hit.price}`,
+                            condition: 'Refurbished',
+                            rating: hit.rating?.average || 'N/A',
+                            reviews: hit.rating?.count || 0,
+                            image: `https://f.nooncdn.com/products/tr:n-t_240/${hit.image_key}.jpg`,
+                            url: `https://www.noon.com/${hit.url}`,
+                            platform: 'Noon'
+                        });
+                    });
+                    console.log(`   Extracted ${results.noon.length} Noon items from JSON.`);
+                }
+            } else {
+                console.log(`   Fetched ${results.noon.length} Noon items from HTML.`);
+            }
+
+        } catch (noonErr) {
+            console.error("   Noon Scrape Failed:", noonErr.message);
+        }
+
+        res.json({ success: true, data: results });
+
+    } catch (err) {
+        console.error("Scrape Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Rate Limit Helper for Resilience
 async function fetchWithRetry(url, options, retries = 3, backoff = 1000) {
     try {
