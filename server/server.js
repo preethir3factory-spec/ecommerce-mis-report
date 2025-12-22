@@ -637,13 +637,18 @@ app.post('/api/fetch-market-trends', async (req, res) => {
 
     console.log("Starting Market Trend Scrape...");
 
+    // Explicit robust list if package fails
+    const modernUserAgents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+    ];
+
     const getRandomUA = () => {
-        // Fallback if the package fails or returns weird stuff
-        const fallback = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-        ];
-        return (uaList && uaList.length > 0) ? uaList[Math.floor(Math.random() * uaList.length)] : fallback[0];
+        try {
+            if (uaList && uaList.length > 0) return uaList[Math.floor(Math.random() * uaList.length)];
+        } catch (e) { }
+        return modernUserAgents[Math.floor(Math.random() * modernUserAgents.length)];
     };
 
     try {
