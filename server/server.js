@@ -89,13 +89,24 @@ app.post('/api/fetch-sales', async (req, res) => {
     }
 
     try {
-        console.log("\n📡 Amazon: Exchanging LWA Token...");
-        const lwaResp = await axios.post('https://api.amazon.com/auth/o2/token', new URLSearchParams({
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            client_id: clientId,
-            client_secret: clientSecret
-        }));
+        let lwaResp;
+        try {
+            lwaResp = await axios.post('https://api.amazon.com/auth/o2/token', new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret
+            }));
+        } catch (lwaErr) {
+            console.error("❌ Amazon LWA Auth Error:", lwaErr.response?.data || lwaErr.message);
+            if (lwaErr.response?.status === 401) {
+                return res.status(401).json({
+                    error: 'Amazon Auth Failed (401): Check your Client ID, Client Secret and Refresh Token in Settings.',
+                    details: lwaErr.response.data
+                });
+            }
+            throw lwaErr;
+        }
         const accessToken = lwaResp.data.access_token;
 
         const aws4 = require('aws4');
@@ -183,9 +194,9 @@ app.post('/api/fetch-sales', async (req, res) => {
                 // Fetch Actual Fees for Recent Orders Only (Performance Optimization)
                 // Older orders will default to Estimated and be picked up by the Auto-Retry Background Process
                 const lookbackDate = new Date(todayStart);
-                lookbackDate.setDate(lookbackDate.getDate() - 2); // Only check last 48h live
+                lookbackDate.setDate(lookbackDate.getDate() - 30); // Check last 30 days (User requested actual fees)
 
-                if (orderDate >= lookbackDate) {
+                if (orderDate >= lookbackDate && o.OrderStatus === 'Shipped') {
                     try {
                         await new Promise(r => setTimeout(r, 1000)); // Faster 1s throttle for recent
                         const finances = await getFinancials(o.AmazonOrderId, accessToken);
@@ -205,16 +216,9 @@ app.post('/api/fetch-sales', async (req, res) => {
                 if (actualFee !== null) {
                     estimatedFee = actualFee;
                 } else {
-                    // Smart Fallback based on User Hint:
-                    // FBA (AFN) = 5%, FBM (MFN) = 6%
-                    const channel = o.FulfillmentChannel || 'MFN';
-                    if (channel === 'AFN') {
-                        estimatedFee = amount * 0.05;
-                        feeType = 'Est (FBA)';
-                    } else {
-                        estimatedFee = amount * 0.06;
-                        feeType = 'Est (FBM)';
-                    }
+                    // Fallback to 6.186% for all orders when actuals fail
+                    estimatedFee = amount * 0.06186;
+                    feeType = 'Estimated (6.186%)';
                 }
 
                 if (amount >= 0) {
@@ -554,8 +558,8 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             const dateStr = o.order_created_at || o.order_date;
             const orderDate = new Date(dateStr);
 
-            // Estimates
-            const estimatedFee = amount * 0.15;
+            // Estimate 6.186% for all Noon orders
+            const estimatedFee = amount * 0.06186;
             const estimatedCost = 0;
 
             allSales += amount;
@@ -571,7 +575,8 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
                 cost: estimatedCost,
                 status: o.status,
                 currency: o.currency_code || 'AED',
-                platform: 'Noon'
+                platform: 'Noon',
+                feeType: 'Estimated (6.186%)'
             });
 
             if (orderDate >= todayStart) {
