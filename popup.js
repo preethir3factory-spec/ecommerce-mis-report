@@ -1191,9 +1191,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            businessId: nBiz,
-                            appKey: nKey,
-                            token: nToken
+                            projectCode: nBiz,  // Business ID -> Project Code
+                            keyId: nKey,        // App Key -> Key ID
+                            keySecret: nToken   // Auth Token -> Private Key
                         })
                     });
 
