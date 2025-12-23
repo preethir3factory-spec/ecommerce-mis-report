@@ -181,18 +181,19 @@
           <line x1="16" y1="8" x2="16" y2="16"></line>
         </svg>
       </button>
+      <button id="trendsBtn" class="explore-btn"
+        style="margin-top: 5px; background: white; color: #43B02A; border: 1px solid #43B02A;">
+        Market Trends
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 6l-9.5 9.5-5-5L1 18"></path>
+          <path d="M17 6h6v6"></path>
+        </svg>
+      </button>
       <div style="text-align: center; margin-top: 10px;">
         <a href="#" id="resetBtn" style="color: #9aa0a6; font-size: 0.8rem; text-decoration: none;">Reset Data &
           Resync</a>
       </div>
     </footer>
-  </div>
-
-  <script src="popup.js"></script>
-  <line x1="16" y1="10" x2="16" y2="16"></line>
-  </svg>
-  </button>
-  </footer>
   </div>
 
   <div id="settings-modal" class="modal hidden">
@@ -219,7 +220,10 @@
           </select>
         </div>
 
-        <input type="password" id="client-secret" class="input-field" placeholder="Key..." />
+        <div class="input-group">
+          <label>Client Secret</label>
+          <input type="password" id="client-secret" class="input-field" placeholder="Client Secret Key" />
+        </div>
 
         <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
 

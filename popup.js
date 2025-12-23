@@ -132,12 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
             liveSkus: 0, totalSkus: 0, weekly: []
         };
 
-        if (currentDate === 'custom' || currentDate === 'month') {
+        if (currentDate === 'custom' || currentDate === 'month' || currentDate === 'all') {
             let start, end;
 
             if (currentDate === 'month') {
                 const now = new Date();
                 start = new Date(now.getFullYear(), now.getMonth(), 1);
+                end = new Date();
+            } else if (currentDate === 'all') {
+                const now = new Date();
+                start = new Date(now);
+                start.setFullYear(start.getFullYear() - 1); // Last 365 Days
                 end = new Date();
             } else {
                 // Custom
@@ -155,6 +160,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 start.setHours(0, 0, 0, 0);
                 end.setHours(23, 59, 59, 999);
 
+                // FIX: Auto-swap if range is reversed (User Error Handing)
+                if (start > end) {
+                    console.warn(`[Filter] Detected reversed range: ${start.toLocaleDateString()} > ${end.toLocaleDateString()}. Swapping.`);
+                    const temp = start; start = end; end = temp;
+
+                    // Update UI input values to reflect the swap (String format to avoid TZ issues)
+                    if (document.getElementById('date-start')) {
+                        const sY = start.getFullYear();
+                        const sM = String(start.getMonth() + 1).padStart(2, '0');
+                        const sD = String(start.getDate()).padStart(2, '0');
+                        document.getElementById('date-start').value = `${sY}-${sM}-${sD}`;
+                    }
+                    if (document.getElementById('date-end')) {
+                        const eY = end.getFullYear();
+                        const eM = String(end.getMonth() + 1).padStart(2, '0');
+                        const eD = String(end.getDate()).padStart(2, '0');
+                        document.getElementById('date-end').value = `${eY}-${eM}-${eD}`;
+                    }
+                }
+
                 console.log(`[Filter] Range: ${start.toLocaleString()} to ${end.toLocaleString()}`);
 
                 if (rawData.detailedOrders) {
@@ -162,10 +187,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const oDate = new Date(o.date);
                         if (oDate >= start && oDate <= end) {
                             if (currentPlatform === 'all' || o.platform.toLowerCase() === currentPlatform) {
+                                // Unified Logic to match Dashboard
+                                stats.sales += o.amount;
+                                stats.fees += (o.fees || 0);
+                                stats.cost += (o.cost || 0);
+
                                 if (o.amount >= 0) {
-                                    stats.sales += o.amount;
-                                    stats.fees += (o.fees || 0);
-                                    stats.cost += (o.cost || 0);
                                     stats.sold++;
                                 } else {
                                     stats.returns += Math.abs(o.amount);
@@ -174,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
                 }
+
             }
 
             // Fallback for SKUs (Use 'all' values)
@@ -721,11 +749,16 @@ document.addEventListener('DOMContentLoaded', () => {
         let statsAmazon = { sales: 0, cost: 0, fees: 0 };
         let statsNoon = { sales: 0, cost: 0, fees: 0 };
 
-        if (currentDate === 'custom' || currentDate === 'month') {
+        if (currentDate === 'custom' || currentDate === 'month' || currentDate === 'all') {
             let start, end;
             if (currentDate === 'month') {
                 const now = new Date();
                 start = new Date(now.getFullYear(), now.getMonth(), 1);
+                end = new Date();
+            } else if (currentDate === 'all') {
+                const now = new Date();
+                start = new Date(now);
+                start.setFullYear(start.getFullYear() - 1);
                 end = new Date();
             } else {
                 const startEl = document.getElementById('date-start');
@@ -1131,7 +1164,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                 });
                             });
                         }
-                        syncMessages.push("✅ Amazon Synced");
+
+                        // User Feedback: Warn if empty
+                        if (rawData.all.amazon.sales === 0 && rawData.all.amazon.sold === 0) {
+                            syncMessages.push("✅ Amazon Synced (But found 0 orders)");
+                            syncMessages.push("   💡 Tip: Check Marketplace ID (UAE vs KSA) in Settings.");
+                        } else {
+                            syncMessages.push("✅ Amazon Synced");
+                        }
                     } else {
                         const errMsg = result.error || (result.data?.today?.status) || 'Unknown Error';
                         syncMessages.push("❌ Amazon Error: " + errMsg);
@@ -1213,6 +1253,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             rawData.lastUpdated = new Date().toISOString();
+
+            // Auto-Retry Logic for Estimated Fees (Transparency & Accuracy)
+            await retryEstimatedFees(token, cid, sec);
+
             saveData();
             renderView();
 
@@ -1225,6 +1269,66 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }
 
+    // Retry Mechanism for Estimates
+    async function retryEstimatedFees(token, cid, sec) {
+        // Find recent orders (365 days) with Estimated fees
+        const now = new Date();
+        const oneYearAgo = new Date(now);
+        oneYearAgo.setFullYear(now.getFullYear() - 1);
+
+        const candidates = rawData.detailedOrders.filter(o =>
+            o.platform === 'Amazon' &&
+            new Date(o.date) >= oneYearAgo &&
+            (!o.feeType || o.feeType.startsWith('Est') || o.feeType === 'Estimated')
+        );
+
+        if (candidates.length === 0) return;
+
+        console.log(`Found ${candidates.length} orders with Estimated fees. Retrying...`);
+        document.getElementById('api-status').textContent = `Refining ${candidates.length} Fees...`;
+
+        // Chunking (Batch of 5 to avoid timeouts)
+        const chunks = [];
+        for (let i = 0; i < candidates.length; i += 5) {
+            chunks.push(candidates.slice(i, i + 5).map(o => o.id));
+        }
+
+        for (const chunk of chunks) {
+            try {
+                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/refresh-fees', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        refreshToken: token, clientId: cid, clientSecret: sec,
+                        orderIds: chunk
+                    })
+                });
+                const result = await response.json();
+                if (result.success && result.data) {
+                    // Update Local Data
+                    let updatedCount = 0;
+                    result.data.forEach(update => {
+                        const target = rawData.detailedOrders.find(o => o.id === update.id);
+                        if (target) {
+                            target.fees = update.fees;
+                            target.feeType = update.feeType;
+                            target.feeError = update.feeError;
+                            updatedCount++;
+                        }
+                    });
+                    // Save and Render per Chunk for Live Feedback
+                    if (updatedCount > 0) {
+                        saveData();
+                        renderView();
+                        document.getElementById('api-status').textContent = `Refining... (${updatedCount} updated)`;
+                    }
+                }
+            } catch (e) {
+                console.error("Retry Chunk Failed:", e);
+            }
+        }
+    }
+
     // Initialize (Load from Storage)
     loadData();
 
@@ -1235,7 +1339,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof chrome !== 'undefined' && chrome.tabs) {
                 chrome.tabs.create({ url: 'explore.html' });
             } else {
-                alert('Explore Dashboard is only available in the extension environment.');
+                window.open('explore.html', '_blank');
+            }
+        });
+    }
+
+    // Market Trends Button
+    const trendsBtn = document.getElementById('trendsBtn');
+    if (trendsBtn) {
+        trendsBtn.addEventListener('click', () => {
+            if (typeof chrome !== 'undefined' && chrome.tabs) {
+                chrome.tabs.create({ url: 'market_trends.html' });
+            } else {
+                window.open('market_trends.html', '_blank');
             }
         });
     }

@@ -1,18 +1,101 @@
+// Global State
+let fullOrders = [];
+let currentFilteredOrders = [];
+
 document.addEventListener('DOMContentLoaded', () => {
+    // Buttons
+    const filterBtns = document.querySelectorAll('.filter-btn[data-range]');
+    const customApply = document.getElementById('custom-apply-btn');
+    const downloadBtn = document.getElementById('download-csv-btn');
+
+    // Load Data
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         chrome.storage.local.get(['misData'], (result) => {
-            if (result.misData) renderDashboard(result.misData);
-            else document.getElementById('data-status').textContent = 'No Data Found.';
+            if (result.misData) {
+                fullOrders = result.misData.detailedOrders || [];
+                document.getElementById('data-status').textContent = `Last Updated: ${formatDate(result.misData.lastUpdated)}`;
+
+                // Initial Render (All Time)
+                applyFilter('all');
+            } else {
+                document.getElementById('data-status').textContent = 'No Data Found.';
+            }
         });
     } else {
         document.getElementById('data-status').textContent = 'Dev Mode (No Chrome Storage)';
     }
+
+    // Filter Listeners
+    filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            // UI Toggle
+            filterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Logic
+            applyFilter(btn.getAttribute('data-range'));
+        });
+    });
+
+    // Custom Date Listener
+    customApply.addEventListener('click', () => {
+        applyFilter('custom');
+    });
+
+    // Download Listener
+    downloadBtn.addEventListener('click', downloadCSV);
 });
 
-function renderDashboard(data) {
-    document.getElementById('data-status').textContent = `Last Updated: ${formatDate(data.lastUpdated)}`;
+// Filter Logic matches user request (Today, Yesterday, 30, 365)
+function applyFilter(range) {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
 
-    const orders = data.detailedOrders || [];
+    // Yesterday
+    const yest = new Date(now);
+    yest.setDate(yest.getDate() - 1);
+    const yestStr = yest.toISOString().split('T')[0];
+
+    let filtered = [];
+
+    if (range === 'all') {
+        filtered = fullOrders;
+    }
+    else if (range === 'today') {
+        filtered = fullOrders.filter(o => o.date && o.date.startsWith(todayStr));
+    }
+    else if (range === 'yesterday') {
+        filtered = fullOrders.filter(o => o.date && o.date.startsWith(yestStr));
+    }
+    else if (range === '30days') {
+        const threshold = new Date(now);
+        threshold.setDate(threshold.getDate() - 30);
+        filtered = fullOrders.filter(o => new Date(o.date) >= threshold);
+    }
+    else if (range === '365days') {
+        const threshold = new Date(now);
+        threshold.setDate(threshold.getDate() - 365);
+        filtered = fullOrders.filter(o => new Date(o.date) >= threshold);
+    }
+    else if (range === 'custom') {
+        const start = document.getElementById('start-date').value;
+        const end = document.getElementById('end-date').value;
+        if (!start || !end) {
+            alert("Please select Start and End dates.");
+            return;
+        }
+        filtered = fullOrders.filter(o => {
+            const d = o.date.split('T')[0];
+            return d >= start && d <= end;
+        });
+    }
+
+    currentFilteredOrders = filtered;
+    renderDashboard(filtered);
+}
+
+function renderDashboard(orders) {
+    // Recalculate everything based on 'orders' subset
     let totalSales = 0, totalMargin = 0, amazonSales = 0, noonSales = 0;
 
     // Aggregation by Date
@@ -67,14 +150,23 @@ function renderDashboard(data) {
 function renderTable(orders) {
     const tbody = document.getElementById('orders-table-body');
     tbody.innerHTML = '';
+
     [...orders].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 50).forEach(o => {
+        const isEst = (o.feeType && o.feeType.includes('Est'));
+        const typeLabel = o.feeType || 'Estimated';
+        const typeColor = isEst ? '#f59e0b' : '#10b981'; // Orange vs Green
+
+        const isRefund = o.amount < 0;
+        const salesDisplay = isRefund ? '-' : formatCurrency(o.amount);
+        const refundDisplay = isRefund ? formatCurrency(Math.abs(o.amount)) : '-';
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${o.date ? o.date.split('T')[0] : ''}</td>
-            <td><span style="font-weight:bold; color:${o.platform === 'Amazon' ? '#eab308' : '#facc15'}">${o.platform}</span></td>
             <td>${o.id}</td>
             <td>${o.status}</td>
-            <td>${formatCurrency(o.amount)}</td>
+            <td>${salesDisplay}</td>
+            <td style="color: #ef4444;">${refundDisplay}</td>
             <td style="color: #ef4444;">-${formatCurrency(o.fees)}</td>
         `;
         tbody.appendChild(tr);
@@ -212,4 +304,43 @@ function drawInteractiveChart(canvas, data) {
         draw();
         tooltip.style.display = 'none';
     };
+}
+
+function downloadCSV() {
+    if (!currentFilteredOrders || currentFilteredOrders.length === 0) {
+        alert("No data to download.");
+        return;
+    }
+
+    // Header
+    const headers = ["Date", "Platform", "Order ID", "Status", "Amount", "Fees", "Cost", "Currency", "Fee Type"];
+
+    // Rows
+    const rows = currentFilteredOrders.map(o => [
+        o.date ? o.date.split('T')[0] : '',
+        o.platform,
+        o.id,
+        o.status,
+        o.amount,
+        o.fees,
+        o.cost,
+        o.currency || 'AED',
+        o.feeType || 'Estimated'
+    ]);
+
+    // Construct CSV String
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `mis_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
