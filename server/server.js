@@ -16,7 +16,7 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // --- CONFIG ---
 const AWS_ACCESS_KEY = process.env.AWS_ACCESS_KEY;

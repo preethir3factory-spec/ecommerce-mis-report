@@ -47,7 +47,11 @@ async function fetchMarketData() {
     if (noonList) noonList.innerHTML = '<div style="padding:20px; text-align:center;">Loading...</div>';
 
     try {
-        const API_URL = 'http://localhost:3000/api/fetch-market-trends';
+        // 🚀 LIVE SERVER URL (Render)
+        // If testing locally, you can switch this back to 'http://localhost:3000/api/fetch-market-trends'
+        const API_URL = 'https://ecommerce-mis-report.onrender.com/api/fetch-market-trends';
+
+        // const API_URL = 'http://localhost:3000/api/fetch-market-trends'; // Use this for local testing
 
         const resp = await fetch(API_URL, {
             method: 'POST',
