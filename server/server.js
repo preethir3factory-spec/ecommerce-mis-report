@@ -163,9 +163,8 @@ app.post('/api/fetch-sales', async (req, res) => {
                 nextToken = nextResp.data.payload.NextToken;
                 pageCount++;
 
-                // Throttling: Wait 2 seconds between pages to respect Amazon Leaky Bucket
-                // Restores burst capacity 
-                await new Promise(r => setTimeout(r, 2000));
+                // Throttling: Wait 500ms between pages (Reduced from 2000ms for speed)
+                await new Promise(r => setTimeout(r, 500));
             }
             console.log(`   Total Orders Fetched: ${orders.length}`);
 
@@ -195,35 +194,11 @@ app.post('/api/fetch-sales', async (req, res) => {
                 let feeType = 'Estimated';
                 let feeError = null;
 
-                // Fetch Actual Fees for Recent Orders Only (Performance Optimization)
-                // Older orders will default to Estimated and be picked up by the Auto-Retry Background Process
-                const lookbackDate = new Date(todayStart);
-                lookbackDate.setDate(lookbackDate.getDate() - 30); // Check last 30 days (User requested actual fees)
-
-                if (orderDate >= lookbackDate && o.OrderStatus === 'Shipped') {
-                    try {
-                        await new Promise(r => setTimeout(r, 1000)); // Faster 1s throttle for recent
-                        const finances = await getFinancials(o.AmazonOrderId, accessToken);
-                        if (finances !== null && !isNaN(finances)) {
-                            actualFee = finances;
-                            feeType = 'Actual';
-                        } else {
-                            feeError = 'No financial events found';
-                        }
-                        console.log(`   Fetched Fees for ${o.AmazonOrderId}: ${actualFee}`);
-                    } catch (e) {
-                        console.warn(`   Failed to fetch fees for ${o.AmazonOrderId} (${e.message})`);
-                        feeError = e.message;
-                    }
-                }
-
-                if (actualFee !== null) {
-                    estimatedFee = actualFee;
-                } else {
-                    // Fallback to 6.186% for all orders when actuals fail
-                    estimatedFee = amount * 0.06186;
-                    feeType = 'Estimated (6.186%)';
-                }
+                // PERFORMANCE UPDATE: Simplified Fee Calculation for Speed.
+                // We default to 6.186% Estimate immediately to avoid blocking calling 'getFinancials'.
+                // The frontend will automatically background-retry these orders to get actuals.
+                estimatedFee = amount * 0.06186;
+                feeType = 'Estimated (6.186%)';
 
                 if (amount >= 0) {
                     allSales += amount;
@@ -521,7 +496,7 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
 
                     offset += limit;
                     pageCount++;
-                    await new Promise(r => setTimeout(r, 500)); // 500ms delay between pages to be nice
+                    await new Promise(r => setTimeout(r, 200)); // 200ms delay for speed
                 }
             }
             orders = allNoonOrders;
