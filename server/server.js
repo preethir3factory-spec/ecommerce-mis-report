@@ -188,6 +188,7 @@ app.post('/api/fetch-sales', async (req, res) => {
                 // Calculate Units
                 const units = (parseInt(o.NumberOfItemsShipped) || 0) + (parseInt(o.NumberOfItemsUnshipped) || 0) || 1;
 
+                // Declare variables
                 let estimatedFee = 0;
                 let estimatedCost = 0;
                 let actualFee = null;
