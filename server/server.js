@@ -174,9 +174,9 @@ app.post('/api/fetch-sales', async (req, res) => {
             if (orders.length === 0) throw err;
         }
 
-        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0;
-        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0;
-        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0;
+        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0, todayUnits = 0;
+        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
+        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
         const ordersList = [];
 
         // Process Orders Sequentially to handle Async Financial fetching
@@ -185,6 +185,9 @@ app.post('/api/fetch-sales', async (req, res) => {
                 if (o.OrderStatus === 'Canceled') continue;
                 const amount = parseFloat(o.OrderTotal.Amount);
                 const orderDate = new Date(o.PurchaseDate);
+
+                // Calculate Units
+                const units = (parseInt(o.NumberOfItemsShipped) || 0) + (parseInt(o.NumberOfItemsUnshipped) || 0) || 1;
 
                 let estimatedFee = 0;
                 let estimatedCost = 0;
@@ -226,12 +229,13 @@ app.post('/api/fetch-sales', async (req, res) => {
                     allSales += amount;
                     allFees += estimatedFee;
                     allCount++;
+                    allUnits += units;
 
                     if (orderDate >= todayStart) {
-                        todaySales += amount; todayCount++; todayFees += estimatedFee;
+                        todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units;
                     }
                     else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee;
+                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units;
                     }
                 } else {
                     allReturns += Math.abs(amount);
@@ -283,17 +287,17 @@ app.post('/api/fetch-sales', async (req, res) => {
             success: true,
             data: {
                 today: {
-                    sales: todaySales, orders: todayCount,
+                    sales: todaySales, orders: todayCount, sold: todayUnits,
                     fees: todayFees, cost: todayCost, returns: todayReturns,
                     status: `Synced`
                 },
                 yesterday: {
-                    sales: yesterdaySales, orders: yesterdayCount,
+                    sales: yesterdaySales, orders: yesterdayCount, sold: yesterdayUnits,
                     fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
                     status: `Synced`
                 },
                 all: {
-                    sales: allSales, orders: allCount,
+                    sales: allSales, orders: allCount, sold: allUnits,
                     fees: allFees, cost: allCost, returns: allReturns
                 },
                 ordersList: ordersList
@@ -544,9 +548,9 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
         }
 
         // 5. Aggregate (Safe handling of empty orders)
-        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0;
-        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0;
-        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0;
+        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0, todayUnits = 0;
+        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
+        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
         const ordersList = [];
 
         const dateNow = new Date();
@@ -563,10 +567,14 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             const estimatedFee = amount * 0.06186;
             const estimatedCost = 0;
 
+            // Calculate Units (Fallback to 1 per order/shipment)
+            const units = (o.items && Array.isArray(o.items)) ? o.items.length : 1;
+
             allSales += amount;
             allFees += estimatedFee;
             allCost += estimatedCost;
             allCount++;
+            allUnits += units;
 
             ordersList.push({
                 id: o.order_id || o.id || 'N/A',
@@ -581,9 +589,9 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             });
 
             if (orderDate >= todayStart) {
-                todaySales += amount; todayCount++; todayFees += estimatedFee;
+                todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units;
             } else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee;
+                yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units;
             }
         });
 
@@ -591,17 +599,17 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             success: true,
             data: {
                 today: {
-                    sales: todaySales, orders: todayCount,
+                    sales: todaySales, orders: todayCount, sold: todayUnits,
                     fees: todayFees, cost: todayCost, returns: todayReturns,
                     status: statusMsg
                 },
                 yesterday: {
-                    sales: yesterdaySales, orders: yesterdayCount,
+                    sales: yesterdaySales, orders: yesterdayCount, sold: yesterdayUnits,
                     fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
                     status: statusMsg
                 },
                 all: {
-                    sales: allSales, orders: allCount,
+                    sales: allSales, orders: allCount, sold: allUnits,
                     fees: allFees, cost: allCost, returns: allReturns,
                     status: statusMsg
                 },
