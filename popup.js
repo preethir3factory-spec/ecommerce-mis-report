@@ -1301,23 +1301,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const chunks = [];
         const now = new Date();
         for (let i = 0; i < 12; i++) {
-            const end = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            // End date for this chunk is the last day of the month
-            const eDate = new Date(now);
-            eDate.setMonth(eDate.getMonth() - i);
-            eDate.setDate(31); // End of month
+            // NEW LOGIC: Precise Month Ranges
+            const tempDate = new Date(now);
+            tempDate.setDate(1);
+            tempDate.setMonth(tempDate.getMonth() - i);
 
-            // Start date for this chunk is 30 days before
-            const sDate = new Date(eDate);
-            sDate.setDate(sDate.getDate() - 30);
+            const y = tempDate.getFullYear();
+            const m = tempDate.getMonth();
 
-            if (i === 0) {
-                // First chunk: Today for Amazon real-time
-                const today = new Date();
-                chunks.push({ start: sDate, end: today });
-            } else {
-                chunks.push({ start: sDate, end: eDate });
-            }
+            // Start: 1st of month
+            const sDate = new Date(y, m, 1, 0, 0, 0, 0);
+
+            // End: Last day of month
+            let eDate = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+            if (i === 0) eDate = new Date();
+
+            chunks.push({ start: sDate, end: eDate });
+
+            // (Old 'end' var removed)
+
         }
 
         let amazonSuccess = false;
