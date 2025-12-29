@@ -70,312 +70,313 @@ app.post('/api/generate-excel', (req, res) => {
 
 // 2. Fetch Amazon Orders
 app.post('/api/fetch-sales', async (req, res) => {
-    const { refreshToken, clientId, clientSecret, marketplaceId, dateRange, customStartDate, customEndDate } = req.body;
-    // ... (lines 74-112 skipped context) ...
-    const now = new Date();
-    // ...
-
-    // Date Logic
-    if (customStartDate) {
-        createdAfter = new Date(customStartDate);
-    } else if (dateRange === '1year') {
-        createdAfter = new Date(now);
-        createdAfter.setFullYear(createdAfter.getFullYear() - 1);
-    } else if (dateRange === '30days') {
-        createdAfter = new Date(now);
-        createdAfter.setDate(createdAfter.getDate() - 30);
-    } else {
-        createdAfter = yesterdayStart;
-    }
-
-    let createdBefore = null;
-    if (customEndDate) {
-        createdBefore = new Date(customEndDate);
-    }
-
-    cutoffDate = createdAfter;
-
-    const host = 'sellingpartnerapi-eu.amazon.com';
-    let path = `/orders/v0/orders?CreatedAfter=${createdAfter.toISOString()}&MarketplaceIds=${targetMarketplaceId}`;
-    if (createdBefore) {
-        path += `&CreatedBefore=${createdBefore.toISOString()}`;
-    }
-
-    aws4.sign(opts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-    let orders = [];
     try {
-        // Initial Fetch with Retry
-        let currentResp = await fetchWithRetry(`https://${opts.host}${opts.path}`, { headers: opts.headers });
-        orders = currentResp.data.payload.Orders || [];
-        let nextToken = currentResp.data.payload.NextToken;
-        let pageCount = 0;
+        const { refreshToken, clientId, clientSecret, marketplaceId, dateRange, customStartDate, customEndDate } = req.body;
+        // ... (lines 74-112 skipped context) ...
+        const now = new Date();
+        // ...
 
-        // Pagination Loop (Max 50 pages ~5000 orders)
-        while (nextToken && pageCount < 50) {
-            const nextOpts = {
-                service: 'execute-api',
-                region: AWS_REGION,
-                method: 'GET',
-                host: host,
-                path: `/orders/v0/orders?NextToken=${encodeURIComponent(nextToken)}`,
-                headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
-            };
-            aws4.sign(nextOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-            // Retryable Fetch with more resilience
-            const nextResp = await fetchWithRetry(`https://${nextOpts.host}${nextOpts.path}`, { headers: nextOpts.headers }, 5, 2000);
-            const nextOrders = nextResp.data.payload.Orders || [];
-            orders = orders.concat(nextOrders);
-            nextToken = nextResp.data.payload.NextToken;
-            pageCount++;
-
-            // Throttling: Wait 500ms between pages (Reduced from 2000ms for speed)
-            await new Promise(r => setTimeout(r, 500));
+        // Date Logic
+        if (customStartDate) {
+            createdAfter = new Date(customStartDate);
+        } else if (dateRange === '1year') {
+            createdAfter = new Date(now);
+            createdAfter.setFullYear(createdAfter.getFullYear() - 1);
+        } else if (dateRange === '30days') {
+            createdAfter = new Date(now);
+            createdAfter.setDate(createdAfter.getDate() - 30);
+        } else {
+            createdAfter = yesterdayStart;
         }
-        console.log(`   Total Orders Fetched: ${orders.length}`);
 
-    } catch (err) {
-        console.error("   Pagination Error (showing partial):", err.message);
-        if (orders.length === 0) throw err;
-    }
+        let createdBefore = null;
+        if (customEndDate) {
+            createdBefore = new Date(customEndDate);
+        }
 
-    let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0, todayUnits = 0;
-    let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
-    let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
-    const ordersList = [];
-    const orderIdsToMatch = new Set();
+        cutoffDate = createdAfter;
 
-    // 1. Collect Order IDs
-    if (orders) {
-        orders.forEach(o => {
-            if (o.AmazonOrderId) orderIdsToMatch.add(o.AmazonOrderId);
-        });
-    }
+        const host = 'sellingpartnerapi-eu.amazon.com';
+        let path = `/orders/v0/orders?CreatedAfter=${createdAfter.toISOString()}&MarketplaceIds=${targetMarketplaceId}`;
+        if (createdBefore) {
+            path += `&CreatedBefore=${createdBefore.toISOString()}`;
+        }
 
-    // 2. Fetch Odoo Data (Invoices)
-    let invoiceMap = {};
-    if (orderIdsToMatch.size > 0) {
-        console.log(`📡 Amazon: Syncing ${orderIdsToMatch.size} Invoices with Odoo...`);
+        aws4.sign(opts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+        let orders = [];
         try {
-            // For Amazon, we might not have SKUs easily, so we rely on Invoices mainly.
-            const invoices = await odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch), 'Souq.com FZ LLC');
-            invoiceMap = invoices;
-            console.log(`✅ Odoo Sync: ${Object.keys(invoiceMap).length} Invoices matched.`);
+            // Initial Fetch with Retry
+            let currentResp = await fetchWithRetry(`https://${opts.host}${opts.path}`, { headers: opts.headers });
+            orders = currentResp.data.payload.Orders || [];
+            let nextToken = currentResp.data.payload.NextToken;
+            let pageCount = 0;
+
+            // Pagination Loop (Max 50 pages ~5000 orders)
+            while (nextToken && pageCount < 50) {
+                const nextOpts = {
+                    service: 'execute-api',
+                    region: AWS_REGION,
+                    method: 'GET',
+                    host: host,
+                    path: `/orders/v0/orders?NextToken=${encodeURIComponent(nextToken)}`,
+                    headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+                };
+                aws4.sign(nextOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+                // Retryable Fetch with more resilience
+                const nextResp = await fetchWithRetry(`https://${nextOpts.host}${nextOpts.path}`, { headers: nextOpts.headers }, 5, 2000);
+                const nextOrders = nextResp.data.payload.Orders || [];
+                orders = orders.concat(nextOrders);
+                nextToken = nextResp.data.payload.NextToken;
+                pageCount++;
+
+                // Throttling: Wait 500ms between pages (Reduced from 2000ms for speed)
+                await new Promise(r => setTimeout(r, 500));
+            }
+            console.log(`   Total Orders Fetched: ${orders.length}`);
+
         } catch (err) {
-            console.error("⚠️ Odoo Sync Failed:", err.message);
-        }
-    }
-
-    // 3. Fallback: Fetch Items for recent orders to get SKUs if Invoice missing
-    // We limit this checks depending on date range to balance speed/throttling.
-    // Deep Sync (customStartDate) or '30days' allows more throughput as chunks are smaller.
-    let skuCheckLimit = 30;
-    if (customStartDate || dateRange === '30days') skuCheckLimit = 200;
-
-    const ordersNeedingSkus = orders.filter(o =>
-        o.AmazonOrderId &&
-        !invoiceMap[o.AmazonOrderId] &&
-        o.OrderStatus !== 'Canceled'
-    ).slice(0, skuCheckLimit);
-
-    let amazonSkuMap = {}; // OrderID -> [SKUs]
-    let masterCostMap = {};
-
-    if (ordersNeedingSkus.length > 0) {
-        console.log(`📦 Amazon: Fetching Items for ${ordersNeedingSkus.length} recent orders (Fallback Cost)...`);
-
-        // Helper to fetch items
-        const fetchItems = async (orderId) => {
-            const itemOpts = {
-                service: 'execute-api',
-                region: AWS_REGION,
-                method: 'GET',
-                host: host,
-                path: `/orders/v0/orders/${orderId}/orderItems`,
-                headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
-            };
-            aws4.sign(itemOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
-
-            try {
-                const res = await fetchWithRetry(`https://${itemOpts.host}${itemOpts.path}`, { headers: itemOpts.headers }, 3, 2000); // More retries
-                const items = res.data.payload.OrderItems || [];
-                const foundSkus = items.map(i => i.SellerSKU).filter(s => s);
-                // Debug Log
-                // console.log(`   Order ${orderId} Items:`, foundSkus);
-                return foundSkus;
-            } catch (e) {
-                console.warn(`   Failed to fetch items for ${orderId}: ${e.message}`);
-                return [];
-            }
-        };
-
-        // Run in chunks of 5
-        const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
-        const chunks = chunk(ordersNeedingSkus.map(o => o.AmazonOrderId), 5);
-
-        const allFoundSkus = new Set();
-
-        for (const batch of chunks) {
-            await Promise.all(batch.map(async (oid) => {
-                const skus = await fetchItems(oid);
-                if (skus.length > 0) {
-                    amazonSkuMap[oid] = skus;
-                    skus.forEach(s => allFoundSkus.add(s));
-                }
-                await new Promise(r => setTimeout(r, 200)); // Slight delay per item
-            }));
-            // Wait 1s between batches to respect 0.5 TPS (approx)
-            await new Promise(r => setTimeout(r, 1000));
+            console.error("   Pagination Error (showing partial):", err.message);
+            if (orders.length === 0) throw err;
         }
 
-        console.log(`📦 Amazon: Found ${allFoundSkus.size} unique SKUs in fallback batch.`);
+        let todaySales = 0, todayCount = 0, todayFees = 0, todayCost = 0, todayReturns = 0, todayUnits = 0;
+        let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
+        let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
+        const ordersList = [];
+        const orderIdsToMatch = new Set();
 
-        // Fetch Costs for these SKUs
-        if (allFoundSkus.size > 0) {
-            try {
-                const skuArray = Array.from(allFoundSkus);
-                console.log(`📦 Amazon: Querying Odoo for SKUs:`, skuArray.slice(0, 5), "...");
-                masterCostMap = await odooClient.fetchCostsForSkus(skuArray);
-                console.log(`✅ Amazon: Retrieved Master Costs for ${Object.keys(masterCostMap).length} SKUs`);
-                console.log(`   Sample Costs:`, JSON.stringify(masterCostMap, null, 2).slice(0, 200));
-            } catch (e) { console.error("   Failed to fetch master costs:", e.message); }
-        }
-    }
-
-    // Process Orders Sequentially to handle Async Financial fetching
-    for (const o of orders) {
-        if (o.OrderTotal && o.OrderTotal.Amount) {
-            if (o.OrderStatus === 'Canceled') continue;
-            const amount = parseFloat(o.OrderTotal.Amount);
-            const orderDate = new Date(o.PurchaseDate);
-
-            // Calculate Units
-            const units = (parseInt(o.NumberOfItemsShipped) || 0) + (parseInt(o.NumberOfItemsUnshipped) || 0) || 1;
-
-            // Declare variables
-            let estimatedFee = 0;
-            let estimatedCost = 0;
-            let actualFee = null;
-            let feeType = 'Estimated';
-            let feeError = null;
-
-            // Match Invoice
-            const invoice = invoiceMap[o.AmazonOrderId];
-
-            // PERFORMANCE UPDATE: Simplified Fee Calculation for Speed.
-            // We default to 6.186% Estimate immediately to avoid blocking calling 'getFinancials'.
-            // The frontend will automatically background-retry these orders to get actuals.
-            estimatedFee = amount * 0.06186;
-            feeType = 'Estimated (6.186%)';
-
-            // Cost Logic (From Invoice Only)
-            if (invoice && invoice.total_cost > 0) {
-                estimatedCost = invoice.total_cost;
-            } else {
-                // Fallback: Check fetched items 
-                const skus = amazonSkuMap[o.AmazonOrderId];
-                if (skus && skus.length > 0) {
-                    // Sum up costs for all items (simplified: assume 1 unit per line if quantity not tracked here, 
-                    // but ideally we should have tracked qty in amazonSkuMap. For now, sum(masterCost))
-                    skus.forEach(sku => {
-                        estimatedCost += (masterCostMap[sku] || 0);
-                    });
-                } else {
-                    estimatedCost = 0;
-                }
-            }
-
-            if (amount >= 0) {
-                allSales += amount;
-                allFees += estimatedFee;
-                allCost += estimatedCost;
-                allCount++;
-                allUnits += units;
-
-                if (orderDate >= todayStart) {
-                    todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units; todayCost += estimatedCost;
-                }
-                else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                    yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units; yesterdayCost += estimatedCost;
-                }
-            } else {
-                allReturns += Math.abs(amount);
-            }
-
-            ordersList.push({
-                id: o.AmazonOrderId,
-                date: o.PurchaseDate,
-                amount: amount,
-                fees: estimatedFee,
-                cost: estimatedCost,
-                status: o.OrderStatus,
-                currency: o.OrderTotal.CurrencyCode,
-                feeType: feeType,
-                feeError: feeError,
-                invoiceRef: invoice ? invoice.name : '',
-                invoiceStatus: invoice ? invoice.payment_state : '',
-                units: units, // Added Units
-                skus: amazonSkuMap[o.AmazonOrderId] ? amazonSkuMap[o.AmazonOrderId].join(', ') : ''
+        // 1. Collect Order IDs
+        if (orders) {
+            orders.forEach(o => {
+                if (o.AmazonOrderId) orderIdsToMatch.add(o.AmazonOrderId);
             });
         }
-    }
 
-    // Helper for Financials
-    async function getFinancials(orderId, token) {
-        const fOpts = {
-            service: 'execute-api', region: AWS_REGION, method: 'GET',
-            host: host, path: `/finances/v0/orders/${orderId}/financialEvents`,
-            headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
-        };
-        aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+        // 2. Fetch Odoo Data (Invoices)
+        let invoiceMap = {};
+        if (orderIdsToMatch.size > 0) {
+            console.log(`📡 Amazon: Syncing ${orderIdsToMatch.size} Invoices with Odoo...`);
+            try {
+                // For Amazon, we might not have SKUs easily, so we rely on Invoices mainly.
+                const invoices = await odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch), 'Souq.com FZ LLC');
+                invoiceMap = invoices;
+                console.log(`✅ Odoo Sync: ${Object.keys(invoiceMap).length} Invoices matched.`);
+            } catch (err) {
+                console.error("⚠️ Odoo Sync Failed:", err.message);
+            }
+        }
 
-        const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 3, 2000);
-        const events = fRes.data.payload.FinancialEvents;
-        let totalFees = 0;
+        // 3. Fallback: Fetch Items for recent orders to get SKUs if Invoice missing
+        // We limit this checks depending on date range to balance speed/throttling.
+        // Deep Sync (customStartDate) or '30days' allows more throughput as chunks are smaller.
+        let skuCheckLimit = 30;
+        if (customStartDate || dateRange === '30days') skuCheckLimit = 200;
 
-        if (events.ShipmentEventList) {
-            events.ShipmentEventList.forEach(ship => {
-                ship.ShipmentItemList.forEach(item => {
-                    if (item.ItemFeeList) {
-                        item.ItemFeeList.forEach(fee => {
-                            totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
-                        });
+        const ordersNeedingSkus = orders.filter(o =>
+            o.AmazonOrderId &&
+            !invoiceMap[o.AmazonOrderId] &&
+            o.OrderStatus !== 'Canceled'
+        ).slice(0, skuCheckLimit);
+
+        let amazonSkuMap = {}; // OrderID -> [SKUs]
+        let masterCostMap = {};
+
+        if (ordersNeedingSkus.length > 0) {
+            console.log(`📦 Amazon: Fetching Items for ${ordersNeedingSkus.length} recent orders (Fallback Cost)...`);
+
+            // Helper to fetch items
+            const fetchItems = async (orderId) => {
+                const itemOpts = {
+                    service: 'execute-api',
+                    region: AWS_REGION,
+                    method: 'GET',
+                    host: host,
+                    path: `/orders/v0/orders/${orderId}/orderItems`,
+                    headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+                };
+                aws4.sign(itemOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+                try {
+                    const res = await fetchWithRetry(`https://${itemOpts.host}${itemOpts.path}`, { headers: itemOpts.headers }, 3, 2000); // More retries
+                    const items = res.data.payload.OrderItems || [];
+                    const foundSkus = items.map(i => i.SellerSKU).filter(s => s);
+                    // Debug Log
+                    // console.log(`   Order ${orderId} Items:`, foundSkus);
+                    return foundSkus;
+                } catch (e) {
+                    console.warn(`   Failed to fetch items for ${orderId}: ${e.message}`);
+                    return [];
+                }
+            };
+
+            // Run in chunks of 5
+            const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+            const chunks = chunk(ordersNeedingSkus.map(o => o.AmazonOrderId), 5);
+
+            const allFoundSkus = new Set();
+
+            for (const batch of chunks) {
+                await Promise.all(batch.map(async (oid) => {
+                    const skus = await fetchItems(oid);
+                    if (skus.length > 0) {
+                        amazonSkuMap[oid] = skus;
+                        skus.forEach(s => allFoundSkus.add(s));
                     }
+                    await new Promise(r => setTimeout(r, 200)); // Slight delay per item
+                }));
+                // Wait 1s between batches to respect 0.5 TPS (approx)
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            console.log(`📦 Amazon: Found ${allFoundSkus.size} unique SKUs in fallback batch.`);
+
+            // Fetch Costs for these SKUs
+            if (allFoundSkus.size > 0) {
+                try {
+                    const skuArray = Array.from(allFoundSkus);
+                    console.log(`📦 Amazon: Querying Odoo for SKUs:`, skuArray.slice(0, 5), "...");
+                    masterCostMap = await odooClient.fetchCostsForSkus(skuArray);
+                    console.log(`✅ Amazon: Retrieved Master Costs for ${Object.keys(masterCostMap).length} SKUs`);
+                    console.log(`   Sample Costs:`, JSON.stringify(masterCostMap, null, 2).slice(0, 200));
+                } catch (e) { console.error("   Failed to fetch master costs:", e.message); }
+            }
+        }
+
+        // Process Orders Sequentially to handle Async Financial fetching
+        for (const o of orders) {
+            if (o.OrderTotal && o.OrderTotal.Amount) {
+                if (o.OrderStatus === 'Canceled') continue;
+                const amount = parseFloat(o.OrderTotal.Amount);
+                const orderDate = new Date(o.PurchaseDate);
+
+                // Calculate Units
+                const units = (parseInt(o.NumberOfItemsShipped) || 0) + (parseInt(o.NumberOfItemsUnshipped) || 0) || 1;
+
+                // Declare variables
+                let estimatedFee = 0;
+                let estimatedCost = 0;
+                let actualFee = null;
+                let feeType = 'Estimated';
+                let feeError = null;
+
+                // Match Invoice
+                const invoice = invoiceMap[o.AmazonOrderId];
+
+                // PERFORMANCE UPDATE: Simplified Fee Calculation for Speed.
+                // We default to 6.186% Estimate immediately to avoid blocking calling 'getFinancials'.
+                // The frontend will automatically background-retry these orders to get actuals.
+                estimatedFee = amount * 0.06186;
+                feeType = 'Estimated (6.186%)';
+
+                // Cost Logic (From Invoice Only)
+                if (invoice && invoice.total_cost > 0) {
+                    estimatedCost = invoice.total_cost;
+                } else {
+                    // Fallback: Check fetched items 
+                    const skus = amazonSkuMap[o.AmazonOrderId];
+                    if (skus && skus.length > 0) {
+                        // Sum up costs for all items (simplified: assume 1 unit per line if quantity not tracked here, 
+                        // but ideally we should have tracked qty in amazonSkuMap. For now, sum(masterCost))
+                        skus.forEach(sku => {
+                            estimatedCost += (masterCostMap[sku] || 0);
+                        });
+                    } else {
+                        estimatedCost = 0;
+                    }
+                }
+
+                if (amount >= 0) {
+                    allSales += amount;
+                    allFees += estimatedFee;
+                    allCost += estimatedCost;
+                    allCount++;
+                    allUnits += units;
+
+                    if (orderDate >= todayStart) {
+                        todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units; todayCost += estimatedCost;
+                    }
+                    else if (orderDate >= yesterdayStart && orderDate < todayStart) {
+                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units; yesterdayCost += estimatedCost;
+                    }
+                } else {
+                    allReturns += Math.abs(amount);
+                }
+
+                ordersList.push({
+                    id: o.AmazonOrderId,
+                    date: o.PurchaseDate,
+                    amount: amount,
+                    fees: estimatedFee,
+                    cost: estimatedCost,
+                    status: o.OrderStatus,
+                    currency: o.OrderTotal.CurrencyCode,
+                    feeType: feeType,
+                    feeError: feeError,
+                    invoiceRef: invoice ? invoice.name : '',
+                    invoiceStatus: invoice ? invoice.payment_state : '',
+                    units: units, // Added Units
+                    skus: amazonSkuMap[o.AmazonOrderId] ? amazonSkuMap[o.AmazonOrderId].join(', ') : ''
                 });
             }
-            );
         }
-        return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
+
+        // Helper for Financials
+        async function getFinancials(orderId, token) {
+            const fOpts = {
+                service: 'execute-api', region: AWS_REGION, method: 'GET',
+                host: host, path: `/finances/v0/orders/${orderId}/financialEvents`,
+                headers: { 'x-amz-access-token': token, 'content-type': 'application/json' }
+            };
+            aws4.sign(fOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+            const fRes = await fetchWithRetry(`https://${fOpts.host}${fOpts.path}`, { headers: fOpts.headers }, 3, 2000);
+            const events = fRes.data.payload.FinancialEvents;
+            let totalFees = 0;
+
+            if (events.ShipmentEventList) {
+                events.ShipmentEventList.forEach(ship => {
+                    ship.ShipmentItemList.forEach(item => {
+                        if (item.ItemFeeList) {
+                            item.ItemFeeList.forEach(fee => {
+                                totalFees += parseFloat(fee.FeeAmount.CurrencyAmount);
+                            });
+                        }
+                    });
+                }
+                );
+            }
+            return Math.abs(totalFees); // Fees are usually negative in API, we want positive magnitude for DB
+        }
+
+        res.json({
+            success: true,
+            data: {
+                today: {
+                    sales: todaySales, orders: todayCount, sold: todayUnits,
+                    fees: todayFees, cost: todayCost, returns: todayReturns,
+                    status: `Synced`
+                },
+                yesterday: {
+                    sales: yesterdaySales, orders: yesterdayCount, sold: yesterdayUnits,
+                    fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
+                    status: `Synced`
+                },
+                all: {
+                    sales: allSales, orders: allCount, sold: allUnits,
+                    fees: allFees, cost: allCost, returns: allReturns
+                },
+                ordersList: ordersList,
+                cutoffDate: cutoffDate  // Send back cutoff so frontend can merge
+            }
+        });
+
+    } catch (err) {
+        console.error("Fetch/Amazon API Error:", err.message);
+        res.status(500).json({ error: err.message, log: err.stack });
     }
-
-    res.json({
-        success: true,
-        data: {
-            today: {
-                sales: todaySales, orders: todayCount, sold: todayUnits,
-                fees: todayFees, cost: todayCost, returns: todayReturns,
-                status: `Synced`
-            },
-            yesterday: {
-                sales: yesterdaySales, orders: yesterdayCount, sold: yesterdayUnits,
-                fees: yesterdayFees, cost: yesterdayCost, returns: yesterdayReturns,
-                status: `Synced`
-            },
-            all: {
-                sales: allSales, orders: allCount, sold: allUnits,
-                fees: allFees, cost: allCost, returns: allReturns
-            },
-            ordersList: ordersList,
-            cutoffDate: cutoffDate  // Send back cutoff so frontend can merge
-        }
-    });
-
-} catch (err) {
-    console.error("Fetch/Amazon API Error:", err.message);
-    res.status(500).json({ error: err.message, log: err.stack });
-}
-    });
+});
 
 // --- ODOO INTEGRATION ---
 const odooClient = require('./odoo_client');
