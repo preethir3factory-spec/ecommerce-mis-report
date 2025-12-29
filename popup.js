@@ -230,16 +230,136 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const margin = stats.sales - stats.cost - (stats.fees || 0);
-        const marginPercent = stats.sales > 0 ? (margin / stats.sales) * 100 : 0;
+        // The following block is inserted/modified based on the instruction
+        let totalSales = stats.sales;
+        let totalFees = stats.fees;
+        let totalReturns = stats.returns;
+        let totalCost = stats.cost; // Initial value from stats
 
-        salesEl.textContent = formatCurrency(stats.sales);
-        costEl.textContent = formatCurrency(stats.cost);
+        // Recalculate Total Cost accurately from Detailed Orders if available
+        // because the 'bucket' data (amazonData, noonData) might not be updated with the latest costs fetched asynchronously
+        if (rawData.detailedOrders && rawData.detailedOrders.length > 0) {
+            let filteredOrders = rawData.detailedOrders;
 
-        if (feesEl) feesEl.textContent = formatCurrency(stats.fees || 0);
+            // Filter by Date
+            let activeFilter = currentDate; // Use currentDate as activeFilter
+            if (activeFilter !== 'all' && activeFilter !== 'custom' && activeFilter !== 'month') { // If all time, take everything
+                // Simple filter check
+                const now = new Date();
+                const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-        marginValEl.textContent = formatCurrency(margin);
-        soldEl.textContent = stats.sold;
+                filteredOrders = filteredOrders.filter(o => {
+                    const d = new Date(o.date);
+                    if (activeFilter === 'today') return d >= startOfDay;
+
+                    const yesterdayStart = new Date(startOfDay); yesterdayStart.setDate(startOfDay.getDate() - 1);
+                    const yesterdayEnd = new Date(startOfDay);
+                    if (activeFilter === 'yesterday') return d >= yesterdayStart && d < yesterdayEnd;
+
+                    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                    if (activeFilter === 'month') return d >= monthStart;
+
+                    // Assuming 'year' filter is not explicitly defined in currentDate, but if it were, this would handle it.
+                    // For now, 'all' covers a year in the original logic, so this might be redundant.
+                    const yearStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 365);
+                    if (activeFilter === 'year') return d >= yearStart;
+
+                    return true;
+                });
+            } else if (activeFilter === 'custom' || activeFilter === 'month' || activeFilter === 'all') {
+                // Re-apply the date range logic from above for detailed orders
+                let start, end;
+                if (activeFilter === 'month') {
+                    const now = new Date();
+                    start = new Date(now.getFullYear(), now.getMonth(), 1);
+                    end = new Date();
+                } else if (activeFilter === 'all') {
+                    const now = new Date();
+                    start = new Date(now);
+                    start.setFullYear(start.getFullYear() - 1); // Last 365 Days
+                    end = new Date();
+                } else { // Custom
+                    const startEl = document.getElementById('date-start');
+                    const endEl = document.getElementById('date-end');
+                    if (startEl && endEl && startEl.value && endEl.value) {
+                        start = new Date(startEl.value);
+                        end = new Date(endEl.value);
+                    }
+                }
+
+                if (start && end) {
+                    start.setHours(0, 0, 0, 0);
+                    end.setHours(23, 59, 59, 999);
+                    filteredOrders = filteredOrders.filter(o => {
+                        const oDate = new Date(o.date);
+                        return oDate >= start && oDate <= end;
+                    });
+                }
+            }
+
+            // Filter by Platform
+            if (currentPlatform !== 'all') {
+                filteredOrders = filteredOrders.filter(o => o.platform.toLowerCase() === currentPlatform);
+            }
+
+            // Sum Costs
+            let calculatedCost = 0;
+            // Also Sum Sales just in case to match
+            let calculatedSales = 0;
+            let calculatedFees = 0;
+            let calculatedReturns = 0;
+
+            filteredOrders.forEach(o => {
+                calculatedCost += (o.cost || 0);
+                calculatedSales += (o.amount || 0);
+                calculatedFees += (o.fees || 0);
+                if (o.amount < 0) { // Assuming negative amount means return
+                    calculatedReturns += Math.abs(o.amount);
+                }
+            });
+
+            // Override Bucket Cost with Detailed Cost if valid
+            totalCost = calculatedCost;
+            totalSales = calculatedSales;
+            totalFees = calculatedFees;
+            totalReturns = calculatedReturns;
+        }
+
+        const netMargin = totalSales - totalCost - totalFees - totalReturns;
+        // Prevent div by zero
+        const marginPercent = totalSales > 0 ? ((netMargin / totalSales) * 100).toFixed(1) : 0;
+
+        // B. Update DOM Elements
+        // Helper to animate numbers
+        const animateValue = (id, start, end, duration) => {
+            const obj = document.getElementById(id);
+            if (!obj) return;
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                const val = progress * (end - start) + start;
+                obj.textContent = formatCurrency(val);
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            window.requestAnimationFrame(step);
+        };
+
+        // Static updates (no animation for now to be safe)
+        if (salesEl) salesEl.textContent = formatCurrency(totalSales);
+        if (costEl) costEl.textContent = formatCurrency(totalCost);
+        if (feesEl) feesEl.textContent = formatCurrency(totalFees); // Update feesEl as well
+        if (marginValEl) { // Use marginValEl instead of marginEl
+            marginValEl.textContent = formatCurrency(netMargin);
+            marginValEl.style.color = netMargin >= 0 ? '#10b981' : '#ef4444';
+        }
+
+        // Update Total Cost Card explicitly if ID exists
+        const totalCostCardEl = document.getElementById('total-cost-amount');
+        if (totalCostCardEl) totalCostCardEl.textContent = formatCurrency(totalCost);
+        soldEl.textContent = stats.sold; // Keep original sold count from stats
 
         const returnsEl = document.getElementById('returns-value');
         const liveSkusEl = document.getElementById('live-sku-count');
@@ -290,6 +410,62 @@ document.addEventListener('DOMContentLoaded', () => {
                 lastUpEl.textContent = `Updated: --`;
             }
         }
+
+        // Render Recent Orders List
+        renderRecentOrders();
+    }
+
+    function renderRecentOrders() {
+        const listContainer = document.getElementById('recent-orders-list');
+        if (!listContainer) return;
+
+        listContainer.innerHTML = '';
+
+        // Get orders relevant to current filter
+        let ordersToShow = [];
+        if (rawData.detailedOrders) {
+            // Basic sort DESC
+            ordersToShow = rawData.detailedOrders.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            // Apply Platform Filter
+            if (currentPlatform !== 'all') {
+                ordersToShow = ordersToShow.filter(o => o.platform.toLowerCase() === currentPlatform);
+            }
+
+            // Show top 20
+            ordersToShow = ordersToShow.slice(0, 20);
+        }
+
+        if (ordersToShow.length === 0) {
+            listContainer.innerHTML = '<div style="font-size:0.8rem; color:#9ca3af; text-align:center;">No recent orders found.</div>';
+            return;
+        }
+
+        ordersToShow.forEach(o => {
+            const card = document.createElement('div');
+            card.className = 'order-card';
+            card.style.cssText = 'background:white; padding:10px; border-radius:6px; border:1px solid #e5e7eb; display:flex; flex-direction:column; gap:4px; margin-bottom: 2px;';
+
+            const costDisp = o.cost > 0 ? formatCurrency(o.cost) : '-';
+            const skuDisp = o.skus ? `<div style="font-size:0.75rem; color:#4b5563; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${o.skus}">📦 ${o.skus}</div>` : '';
+            const invDisp = o.invoiceRef ? `<span style="background:#f3f4f6; color:#374151; padding:2px 6px; border-radius:4px; font-size:0.7rem;">INV: ${o.invoiceRef}</span>` : '';
+
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:600; font-size:0.8rem; color:#111827;">${o.id}</span>
+                    <span style="font-size:0.75rem; color:${o.platform === 'Amazon' ? '#f59e0b' : '#eab308'}; font-weight:500;">${o.platform}</span>
+                </div>
+                ${skuDisp}
+                <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:4px;">
+                    <div style="display:flex; flex-direction:column;">
+                        <span style="font-size:0.7rem; color:#6b7280;">Sales: <b>${formatCurrency(o.amount)}</b></span>
+                        <span style="font-size:0.7rem; color:#6b7280;">Cost: <b>${costDisp}</b></span>
+                    </div>
+                    ${invDisp}
+                </div>
+            `;
+            listContainer.appendChild(card);
+        });
     }
 
     function renderChart(weeklyData) {
@@ -1087,186 +1263,191 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Live Sync (requires local server)
-    if (testApiBtn) {
+    // Live Sync (Unified Logic)
+    const quickSyncBtn = document.getElementById('quick-sync-btn');
 
+    async function performSync(creds = null) {
+        // UI Feedback
+        const statusEl = document.getElementById('api-status');
+        const lastUpEl = document.getElementById('last-updated');
 
-        testApiBtn.addEventListener('click', async () => {
-            const token = amazonInput.value.trim();
-            const cid = clientIdInput.value.trim();
-            const sec = clientSecretInput.value.trim();
-            const mpId = marketplaceInput.value || 'A2VIGQ35RCS4UG';
+        if (statusEl) { statusEl.textContent = "Starting Sync..."; statusEl.style.color = "blue"; }
+        if (lastUpEl) lastUpEl.textContent = "Syncing...";
 
-            const nBiz = noonBizInput.value.trim();
-            const nKey = noonKeyInput.value.trim();
-            const nToken = noonTokenInput.value.trim();
+        // 1. Get Credentials
+        let token, cid, sec, mpId, nBiz, nKey, nToken;
 
-            apiStatusDiv.textContent = "Connecting...";
-            apiStatusDiv.style.color = "blue";
+        if (creds) {
+            ({ token, cid, sec, mpId, nBiz, nKey, nToken } = creds);
+        } else {
+            const result = await new Promise(resolve =>
+                chrome.storage.local.get(['amazonToken', 'clientId', 'clientSecret', 'marketplaceId', 'noonBiz', 'noonKey', 'noonToken'], resolve)
+            );
+            token = result.amazonToken;
+            cid = result.clientId;
+            sec = result.clientSecret;
+            mpId = result.marketplaceId || 'A2VIGQ35RCS4UG';
+            nBiz = result.noonBiz;
+            nKey = result.noonKey;
+            nToken = result.noonToken;
+        }
 
-            let syncMessages = [];
+        let syncMessages = [];
 
-            // --- 1. SYNC AMAZON ---
-            if (token && cid && sec) {
-                try {
-                    apiStatusDiv.textContent = "Syncing Amazon...";
-                    const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            refreshToken: token,
-                            clientId: cid,
-                            clientSecret: sec,
-                            marketplaceId: mpId,
-                            dateRange: '1year'
-                        })
+        // --- 1. SYNC AMAZON ---
+        if (token && cid && sec) {
+            try {
+                if (statusEl) statusEl.textContent = "Syncing Amazon...";
+                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId, dateRange: '30days'
+                    })
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success && result.data) {
+                    // Update Buckets
+                    ['today', 'yesterday', 'all'].forEach(k => {
+                        if (result.data[k]) {
+                            // Merge bucket counts properly? 
+                            // Actually, bucket counts from server are for the requested range. 
+                            // If we request 30 days, 'all' bucket is only 30 days.
+                            // However, we rely on detailedOrders recalculation in renderView() so these buckets are just temporary placeholders or for fast 'today' display.
+                            rawData[k].amazon = { ...rawData[k].amazon, ...result.data[k] };
+                        }
                     });
 
-                    const result = await response.json();
-                    if (response.ok && result.success) {
-                        // Update Amazon Data
-                        if (result.data && result.data.today) {
-                            rawData.today.amazon.sales = result.data.today.sales || 0;
-                            rawData.today.amazon.sold = result.data.today.orders || 0;
-                            rawData.today.amazon.fees = result.data.today.fees || 0;
-                            rawData.today.amazon.cost = result.data.today.cost || 0;
-                            rawData.today.amazon.returns = result.data.today.returns || 0;
-                        }
-                        if (result.data && result.data.yesterday) {
-                            rawData.yesterday.amazon.sales = result.data.yesterday.sales || 0;
-                            rawData.yesterday.amazon.sold = result.data.yesterday.orders || 0;
-                            rawData.yesterday.amazon.fees = result.data.yesterday.fees || 0;
-                            rawData.yesterday.amazon.cost = result.data.yesterday.cost || 0;
-                            rawData.yesterday.amazon.returns = result.data.yesterday.returns || 0;
-                        }
-                        if (result.data && result.data.all) {
-                            rawData.all.amazon.sales = result.data.all.sales || 0;
-                            rawData.all.amazon.sold = result.data.all.orders || 0;
-                            rawData.all.amazon.fees = result.data.all.fees || 0;
-                            rawData.all.amazon.cost = result.data.all.cost || 0;
-                            rawData.all.amazon.returns = result.data.all.returns || 0;
-                        }
-
-                        // Save Detailed Orders (Amazon)
-                        if (result.data && result.data.ordersList) {
-                            // Remove old Amazon data
-                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Amazon');
-
-                            result.data.ordersList.forEach(order => {
-                                rawData.detailedOrders.push({
-                                    id: order.id,
-                                    date: order.date,
-                                    platform: 'Amazon',
-                                    amount: order.amount,
-                                    fees: order.fees || 0,
-                                    cost: order.cost || 0,
-                                    status: order.status,
-                                    currency: order.currency
-                                });
-                            });
-                        }
-
-                        // User Feedback: Warn if empty
-                        if (rawData.all.amazon.sales === 0 && rawData.all.amazon.sold === 0) {
-                            syncMessages.push("✅ Amazon Synced (But found 0 orders)");
-                            syncMessages.push("   💡 Tip: Check Marketplace ID (UAE vs KSA) in Settings.");
+                    // Update Detailed Orders (Smart Merge)
+                    if (result.data.ordersList) {
+                        const cutoff = result.data.cutoffDate ? new Date(result.data.cutoffDate) : null;
+                        if (cutoff) {
+                            // Retain orders OLDER than the cutoff from Amazon
+                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Amazon' || new Date(o.date) < cutoff);
                         } else {
-                            syncMessages.push("✅ Amazon Synced");
+                            // Fallback: Clear all Amazon
+                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Amazon');
                         }
-                    } else {
-                        const errMsg = result.error || (result.data?.today?.status) || 'Unknown Error';
-                        syncMessages.push("❌ Amazon Error: " + errMsg);
-                    }
-                } catch (err) {
-                    syncMessages.push("❌ Amazon Failed: " + err.message);
-                }
-            } else {
-                syncMessages.push("ℹ️ Amazon: Skipped (Missing Creds)");
-            }
 
-            // --- 2. SYNC NOON ---
-            if (nBiz && nToken) {
-                try {
-                    apiStatusDiv.textContent = "Syncing Noon...";
-                    const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            projectCode: nBiz,  // Business ID -> Project Code
-                            keyId: nKey,        // App Key -> Key ID
-                            keySecret: nToken   // Auth Token -> Private Key
-                        })
+                        result.data.ordersList.forEach(order => {
+                            rawData.detailedOrders.push({
+                                id: order.id, date: order.date, platform: 'Amazon',
+                                amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
+                                status: order.status, currency: order.currency,
+                                feeType: order.feeType, feeError: order.feeError,
+                                invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                            });
+                        });
+                    }
+
+                    syncMessages.push("✅ Amazon Synced");
+                } else {
+                    syncMessages.push("❌ Amazon Error: " + (result.error || 'Unknown'));
+                }
+            } catch (err) {
+                syncMessages.push("❌ Amazon Failed: " + err.message);
+            }
+        } else {
+            syncMessages.push("ℹ️ Amazon: Skipped (Missing Creds)");
+        }
+
+        // --- 2. SYNC NOON ---
+        if (nBiz && nToken) {
+            try {
+                if (statusEl) statusEl.textContent = "Syncing Noon...";
+                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectCode: nBiz, keyId: nKey, keySecret: nToken, dateRange: '30days' })
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success && result.data) {
+                    // Update Buckets
+                    ['today', 'yesterday', 'all'].forEach(k => {
+                        if (result.data[k]) {
+                            rawData[k].noon = { ...rawData[k].noon, ...result.data[k] };
+                        }
                     });
 
-                    const result = await response.json();
-                    if (response.ok && result.success) {
-                        // Update Noon Data
-                        if (result.data.today) {
-                            rawData.today.noon.sales = result.data.today.sales || 0;
-                            rawData.today.noon.sold = result.data.today.orders || 0;
-                            rawData.today.noon.fees = result.data.today.fees || 0;
-                            rawData.today.noon.cost = result.data.today.cost || 0;
-                            rawData.today.noon.returns = result.data.today.returns || 0;
-                        }
-                        if (result.data.yesterday) {
-                            rawData.yesterday.noon.sales = result.data.yesterday.sales || 0;
-                            rawData.yesterday.noon.sold = result.data.yesterday.orders || 0;
-                            rawData.yesterday.noon.fees = result.data.yesterday.fees || 0;
-                            rawData.yesterday.noon.cost = result.data.yesterday.cost || 0;
-                            rawData.yesterday.noon.returns = result.data.yesterday.returns || 0;
-                        }
-                        if (result.data.all) {
-                            rawData.all.noon.sales = result.data.all.sales || 0;
-                            rawData.all.noon.sold = result.data.all.orders || 0;
-                            rawData.all.noon.fees = result.data.all.fees || 0;
-                            rawData.all.noon.cost = result.data.all.cost || 0;
-                            rawData.all.noon.returns = result.data.all.returns || 0;
-                        }
-
-                        // Save Detailed Orders (Noon) - Replace Logic
-                        if (result.data.ordersList) {
-                            // Remove old Noon data
+                    // Update Detailed Orders (Smart Merge)
+                    if (result.data.ordersList) {
+                        const cutoff = result.data.cutoffDate ? new Date(result.data.cutoffDate) : null;
+                        if (cutoff) {
+                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Noon' || new Date(o.date) < cutoff);
+                        } else {
                             rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Noon');
-
-                            // Add new
-                            result.data.ordersList.forEach(order => {
-                                rawData.detailedOrders.push({
-                                    id: order.id,
-                                    date: order.date,
-                                    platform: 'Noon',
-                                    amount: order.amount,
-                                    fees: order.fees || 0,
-                                    cost: order.cost || 0,
-                                    status: order.status,
-                                    currency: order.currency
-                                });
-                            });
                         }
-                        syncMessages.push("✅ Noon Synced");
-                    } else {
-                        syncMessages.push("❌ Noon Error: " + (result.error || 'Unknown'));
+
+                        result.data.ordersList.forEach(order => {
+                            rawData.detailedOrders.push({
+                                id: order.id, date: order.date, platform: 'Noon',
+                                amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
+                                status: order.status, currency: order.currency,
+                                invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                            });
+                        });
                     }
-                } catch (err) {
-                    syncMessages.push("❌ Noon Failed: " + err.message);
+                    syncMessages.push("✅ Noon Synced");
+                } else {
+                    syncMessages.push("❌ Noon Error: " + (result.error || 'Unknown'));
                 }
-            } else {
-                syncMessages.push("ℹ️ Noon: Skipped (Missing Creds)");
+            } catch (err) {
+                syncMessages.push("❌ Noon Failed: " + err.message);
             }
+        } else {
+            syncMessages.push("ℹ️ Noon: Skipped (Missing Creds)");
+        }
 
-            rawData.lastUpdated = new Date().toISOString();
+        // Finalize
+        rawData.lastUpdated = new Date().toISOString();
+        saveData();
+        renderView();
 
-            // Auto-Retry Logic for Estimated Fees (Transparency & Accuracy)
-            await retryEstimatedFees(token, cid, sec);
+        if (statusEl) statusEl.textContent = "Done.";
 
-            saveData();
-            renderView();
+        // Auto-Retry Estimates (Background)
+        retryEstimatedFees(token, cid, sec).catch(console.error);
 
-            apiStatusDiv.textContent = "Done.";
-            alert(`Sync Status:\n\n${syncMessages.join('\n')}`);
-            if (syncMessages.some(m => m.includes('✅'))) {
+        // Feedback
+        if (syncMessages.some(m => m.includes('✅'))) {
+            // Success
+            if (lastUpEl) lastUpEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+            if (statusEl) statusEl.style.color = "green";
+            if (creds) { // Only close modal if triggered from Settings
                 settingsModal.classList.add('hidden');
+                alert(`Sync Complete:\n\n${syncMessages.join('\n')}`);
+            } else {
+                // Quick Sync Feedback
+                // No alert, just UI update + maybe console
+                console.log("Quick Sync Full Report:", syncMessages);
             }
-        });
+        } else {
+            // Failure
+            if (lastUpEl) lastUpEl.textContent = "Sync Failed";
+            alert(`Sync Issues:\n\n${syncMessages.join('\n')}`);
+        }
+    }
 
+    if (testApiBtn) {
+        testApiBtn.addEventListener('click', () => {
+            performSync({
+                token: amazonInput.value.trim(),
+                cid: clientIdInput.value.trim(),
+                sec: clientSecretInput.value.trim(),
+                mpId: marketplaceInput.value || 'A2VIGQ35RCS4UG',
+                nBiz: noonBizInput.value.trim(),
+                nKey: noonKeyInput.value.trim(),
+                nToken: noonTokenInput.value.trim()
+            });
+        });
+    }
+
+    if (quickSyncBtn) {
+        quickSyncBtn.addEventListener('click', () => {
+            performSync(); // No args = Load from storage
+        });
     }
 
     // Retry Mechanism for Estimates

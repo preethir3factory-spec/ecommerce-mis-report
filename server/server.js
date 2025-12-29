@@ -110,18 +110,23 @@ app.post('/api/fetch-sales', async (req, res) => {
         const accessToken = lwaResp.data.access_token;
 
         const aws4 = require('aws4');
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const yesterdayStart = new Date(todayStart);
-        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
         let createdAfter;
+        let cutoffDate;
+        const now = new Date();
+        const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())); // UTC Today
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1);
+
         if (dateRange === '1year') {
             createdAfter = new Date(now);
             createdAfter.setFullYear(createdAfter.getFullYear() - 1);
+        } else if (dateRange === '30days') {
+            createdAfter = new Date(now);
+            createdAfter.setDate(createdAfter.getDate() - 30);
         } else {
             createdAfter = yesterdayStart;
         }
+        cutoffDate = createdAfter;
 
         const host = 'sellingpartnerapi-eu.amazon.com';
         const opts = {
@@ -177,6 +182,100 @@ app.post('/api/fetch-sales', async (req, res) => {
         let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
         let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
         const ordersList = [];
+        const orderIdsToMatch = new Set();
+
+        // 1. Collect Order IDs
+        if (orders) {
+            orders.forEach(o => {
+                if (o.AmazonOrderId) orderIdsToMatch.add(o.AmazonOrderId);
+            });
+        }
+
+        // 2. Fetch Odoo Data (Invoices)
+        let invoiceMap = {};
+        if (orderIdsToMatch.size > 0) {
+            console.log(`📡 Amazon: Syncing ${orderIdsToMatch.size} Invoices with Odoo...`);
+            try {
+                // For Amazon, we might not have SKUs easily, so we rely on Invoices mainly.
+                const invoices = await odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch));
+                invoiceMap = invoices;
+                console.log(`✅ Odoo Sync: ${Object.keys(invoiceMap).length} Invoices matched.`);
+            } catch (err) {
+                console.error("⚠️ Odoo Sync Failed:", err.message);
+            }
+        }
+
+        // 3. Fallback: Fetch Items for recent orders to get SKUs if Invoice missing
+        // We limit this to the most recent 30 verified orders to avoid Rate Limiting (0.5/sec)
+        const ordersNeedingSkus = orders.filter(o =>
+            o.AmazonOrderId &&
+            !invoiceMap[o.AmazonOrderId] &&
+            o.OrderStatus !== 'Canceled'
+        ).slice(0, 30);
+
+        let amazonSkuMap = {}; // OrderID -> [SKUs]
+        let masterCostMap = {};
+
+        if (ordersNeedingSkus.length > 0) {
+            console.log(`📦 Amazon: Fetching Items for ${ordersNeedingSkus.length} recent orders (Fallback Cost)...`);
+
+            // Helper to fetch items
+            const fetchItems = async (orderId) => {
+                const itemOpts = {
+                    service: 'execute-api',
+                    region: AWS_REGION,
+                    method: 'GET',
+                    host: host,
+                    path: `/orders/v0/orders/${orderId}/orderItems`,
+                    headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+                };
+                aws4.sign(itemOpts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
+
+                try {
+                    const res = await fetchWithRetry(`https://${itemOpts.host}${itemOpts.path}`, { headers: itemOpts.headers }, 3, 2000); // More retries
+                    const items = res.data.payload.OrderItems || [];
+                    const foundSkus = items.map(i => i.SellerSKU).filter(s => s);
+                    // Debug Log
+                    // console.log(`   Order ${orderId} Items:`, foundSkus);
+                    return foundSkus;
+                } catch (e) {
+                    console.warn(`   Failed to fetch items for ${orderId}: ${e.message}`);
+                    return [];
+                }
+            };
+
+            // Run in chunks of 5
+            const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+            const chunks = chunk(ordersNeedingSkus.map(o => o.AmazonOrderId), 5);
+
+            const allFoundSkus = new Set();
+
+            for (const batch of chunks) {
+                await Promise.all(batch.map(async (oid) => {
+                    const skus = await fetchItems(oid);
+                    if (skus.length > 0) {
+                        amazonSkuMap[oid] = skus;
+                        skus.forEach(s => allFoundSkus.add(s));
+                    }
+                    await new Promise(r => setTimeout(r, 200)); // Slight delay per item
+                }));
+                // Wait 1s between batches to respect 0.5 TPS (approx)
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            console.log(`📦 Amazon: Found ${allFoundSkus.size} unique SKUs in fallback batch.`);
+
+            // Fetch Costs for these SKUs
+            if (allFoundSkus.size > 0) {
+                try {
+                    const skuArray = Array.from(allFoundSkus);
+                    console.log(`📦 Amazon: Querying Odoo for SKUs:`, skuArray.slice(0, 5), "...");
+                    masterCostMap = await odooClient.fetchCostsForSkus(skuArray);
+                    console.log(`✅ Amazon: Retrieved Master Costs for ${Object.keys(masterCostMap).length} SKUs`);
+                    console.log(`   Sample Costs:`, JSON.stringify(masterCostMap, null, 2).slice(0, 200));
+                } catch (e) { console.error("   Failed to fetch master costs:", e.message); }
+            }
+        }
 
         // Process Orders Sequentially to handle Async Financial fetching
         for (const o of orders) {
@@ -195,23 +294,44 @@ app.post('/api/fetch-sales', async (req, res) => {
                 let feeType = 'Estimated';
                 let feeError = null;
 
+                // Match Invoice
+                const invoice = invoiceMap[o.AmazonOrderId];
+
                 // PERFORMANCE UPDATE: Simplified Fee Calculation for Speed.
                 // We default to 6.186% Estimate immediately to avoid blocking calling 'getFinancials'.
                 // The frontend will automatically background-retry these orders to get actuals.
                 estimatedFee = amount * 0.06186;
                 feeType = 'Estimated (6.186%)';
 
+                // Cost Logic (From Invoice Only)
+                if (invoice && invoice.total_cost > 0) {
+                    estimatedCost = invoice.total_cost;
+                } else {
+                    // Fallback: Check fetched items 
+                    const skus = amazonSkuMap[o.AmazonOrderId];
+                    if (skus && skus.length > 0) {
+                        // Sum up costs for all items (simplified: assume 1 unit per line if quantity not tracked here, 
+                        // but ideally we should have tracked qty in amazonSkuMap. For now, sum(masterCost))
+                        skus.forEach(sku => {
+                            estimatedCost += (masterCostMap[sku] || 0);
+                        });
+                    } else {
+                        estimatedCost = 0;
+                    }
+                }
+
                 if (amount >= 0) {
                     allSales += amount;
                     allFees += estimatedFee;
+                    allCost += estimatedCost;
                     allCount++;
                     allUnits += units;
 
                     if (orderDate >= todayStart) {
-                        todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units;
+                        todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units; todayCost += estimatedCost;
                     }
                     else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units;
+                        yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units; yesterdayCost += estimatedCost;
                     }
                 } else {
                     allReturns += Math.abs(amount);
@@ -226,7 +346,11 @@ app.post('/api/fetch-sales', async (req, res) => {
                     status: o.OrderStatus,
                     currency: o.OrderTotal.CurrencyCode,
                     feeType: feeType,
-                    feeError: feeError
+                    feeError: feeError,
+                    invoiceRef: invoice ? invoice.name : '',
+                    invoiceStatus: invoice ? invoice.payment_state : '',
+                    units: units, // Added Units
+                    skus: amazonSkuMap[o.AmazonOrderId] ? amazonSkuMap[o.AmazonOrderId].join(', ') : ''
                 });
             }
         }
@@ -276,13 +400,44 @@ app.post('/api/fetch-sales', async (req, res) => {
                     sales: allSales, orders: allCount, sold: allUnits,
                     fees: allFees, cost: allCost, returns: allReturns
                 },
-                ordersList: ordersList
+                ordersList: ordersList,
+                cutoffDate: cutoffDate  // Send back cutoff so frontend can merge
             }
         });
 
     } catch (err) {
         console.error("Fetch/Amazon API Error:", err.message);
         res.status(500).json({ error: err.message, log: err.stack });
+    }
+});
+
+// --- ODOO INTEGRATION ---
+const odooClient = require('./odoo_client');
+
+app.get('/api/odoo/products', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 20;
+        const products = await odooClient.fetchProducts(limit);
+
+        // Transform for frontend if needed
+        const mapped = products.map(p => ({
+            id: p.id,
+            name: p.name,
+            cost: p.standard_price, // 'Cost'
+            sku: p.default_code,    // 'Tracking Number'
+            barcode: p.barcode,
+            stock: p.qty_available,
+            category: p.categ_id ? p.categ_id[1] : 'Unknown'
+        }));
+
+        res.json({ success: true, count: mapped.length, data: mapped });
+    } catch (err) {
+        console.error("Odoo API Error:", err);
+        res.status(500).json({
+            success: false,
+            error: "Failed to fetch from Odoo",
+            details: err.message
+        });
     }
 });
 
@@ -438,16 +593,27 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
         let statusMsg = "Synced";
         const orderUrl = 'https://api.noon.partners/fbpi/v1/shipment/get';
 
+        // Get Date Limit
+        const dateRange = req.body.dateRange;
+        let limitDate = new Date();
+        if (dateRange === '1year') {
+            limitDate.setFullYear(limitDate.getFullYear() - 1);
+        } else if (dateRange === '30days') {
+            limitDate.setDate(limitDate.getDate() - 30);
+        } else {
+            // Default to yesterday
+            limitDate.setDate(limitDate.getDate() - 1);
+        }
+
         try {
             let allNoonOrders = [];
             let offset = 0;
             const limit = 50;
             let keepFetching = true;
             let pageCount = 0;
-            const oneYearAgo = new Date();
-            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-            console.log(`📡 Fetching Shipments from: ${orderUrl} (Bearer Auth - POST) - Pagination Enabled`);
+            console.log(`📡 Fetching Shipments from: ${orderUrl} until ${limitDate.toISOString()} (Bearer Auth - POST)`);
+
 
             // Credentials for Headers
             const userCode = creds.channel_identifier; // e.g. mukul@p47635...
@@ -485,8 +651,8 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
                     const lastDateStr = lastOrder.order_created_at || lastOrder.order_date;
                     if (lastDateStr) {
                         const lastDate = new Date(lastDateStr);
-                        if (lastDate < oneYearAgo) {
-                            console.log(`   Stopped fetching: Reached orders older than 1 year (${lastDateStr})`);
+                        if (lastDate < limitDate) {
+                            console.log(`   Stopped fetching: Reached limit (${limitDate.toISOString()}) at ${lastDateStr}`);
                             keepFetching = false;
                         }
                     }
@@ -528,20 +694,95 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
         let yesterdaySales = 0, yesterdayCount = 0, yesterdayFees = 0, yesterdayCost = 0, yesterdayReturns = 0, yesterdayUnits = 0;
         let allSales = 0, allCount = 0, allFees = 0, allCost = 0, allReturns = 0, allUnits = 0;
         const ordersList = [];
+        const skusToFetch = new Set();
+        const orderIdsToMatch = new Set();
 
         const dateNow = new Date();
         const todayStart = new Date(dateNow.getFullYear(), dateNow.getMonth(), dateNow.getDate());
         const yesterdayStart = new Date(todayStart);
         yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
+        // 1. First Pass: Collect SKUs & Order IDs
+        orders.forEach(o => {
+            if (o.items && Array.isArray(o.items)) {
+                o.items.forEach(item => {
+                    const sku = item.partner_sku || item.sku;
+                    if (sku) skusToFetch.add(sku);
+                });
+            }
+            // Noon Order ID is likely the 'ref' in Odoo
+            const orderId = o.order_id || o.id;
+            if (orderId) orderIdsToMatch.add(orderId);
+        });
+
+        // 2. Fetch Data from Odoo (Parallel)
+        let costMap = {};
+        let invoiceMap = {};
+
+        try {
+            console.log(`📡 Syncing Odoo (Costs & Invoices)...`);
+            const [costs, invoices] = await Promise.all([
+                skusToFetch.size > 0 ? odooClient.fetchCostsForSkus(Array.from(skusToFetch)) : {},
+                orderIdsToMatch.size > 0 ? odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch)) : {}
+            ]);
+            costMap = costs;
+            invoiceMap = invoices;
+            console.log(`✅ Odoo Sync: ${Object.keys(costMap).length} Costs, ${Object.keys(invoiceMap).length} Invoices matched.`);
+        } catch (err) {
+            console.error("⚠️ Odoo Sync Failed:", err.message);
+        }
+
         orders.forEach(o => {
             const amount = o.total_amount || 0;
             const dateStr = o.order_created_at || o.order_date;
             const orderDate = new Date(dateStr);
+            const orderId = o.order_id || o.id;
 
             // Estimate 6.186% for all Noon orders
             const estimatedFee = amount * 0.06186;
-            const estimatedCost = 0;
+
+            // Invoice Matching
+            const invoice = invoiceMap[orderId];
+            const invoiceRef = invoice ? invoice.name : 'Pending';
+            const paymentState = invoice ? invoice.payment_state : 'Not Paid';
+
+            // Calculate Cost using Odoo Data
+            let totalOrderCost = 0;
+            let orderSkus = [];
+
+            if (invoice && invoice.total_cost && invoice.total_cost > 0) {
+                // CASE 1: Use Cost from Validated Invoice (Snapshot)
+                totalOrderCost = invoice.total_cost;
+            } else {
+                // CASE 2: Fallback to Master Product Cost
+                if (o.items && Array.isArray(o.items)) {
+                    o.items.forEach(item => {
+                        const sku = item.partner_sku || item.sku;
+                        if (sku) {
+                            orderSkus.push(sku);
+                            const unitCost = costMap[sku] || 0;
+                            totalOrderCost += unitCost;
+                        }
+                    });
+                } else if (o.order_items && Array.isArray(o.order_items)) {
+                    o.order_items.forEach(item => {
+                        const sku = item.sku;
+                        if (sku) {
+                            orderSkus.push(sku);
+                            totalOrderCost += (costMap[sku] || 0);
+                        }
+                    });
+                }
+            }
+
+            // Re-populate SKUs for CSV if not done (i.e. if we used Invoice Cost)
+            if (orderSkus.length === 0) {
+                if (o.items && Array.isArray(o.items)) {
+                    o.items.forEach(item => { if (item.partner_sku || item.sku) orderSkus.push(item.partner_sku || item.sku); });
+                }
+            }
+
+            const estimatedCost = totalOrderCost;
 
             // Calculate Units (Fallback to 1 per order/shipment)
             const units = (o.items && Array.isArray(o.items)) ? o.items.length : 1;
@@ -553,7 +794,7 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             allUnits += units;
 
             ordersList.push({
-                id: o.order_id || o.id || 'N/A',
+                id: orderId || 'N/A',
                 date: dateStr,
                 amount: amount,
                 fees: estimatedFee,
@@ -561,13 +802,17 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
                 status: o.status,
                 currency: o.currency_code || 'AED',
                 platform: 'Noon',
-                feeType: 'Estimated (6.186%)'
+                feeType: 'Estimated (6.186%)',
+                skus: orderSkus.join(', '),
+                invoiceRef: invoiceRef,
+                invoiceStatus: paymentState,
+                units: units // Added Units
             });
 
             if (orderDate >= todayStart) {
-                todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units;
+                todaySales += amount; todayCount++; todayFees += estimatedFee; todayUnits += units; todayCost += estimatedCost;
             } else if (orderDate >= yesterdayStart && orderDate < todayStart) {
-                yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units;
+                yesterdaySales += amount; yesterdayCount++; yesterdayFees += estimatedFee; yesterdayUnits += units; yesterdayCost += estimatedCost;
             }
         });
 
@@ -586,12 +831,14 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
                 },
                 all: {
                     sales: allSales, orders: allCount, sold: allUnits,
-                    fees: allFees, cost: allCost, returns: allReturns,
-                    status: statusMsg
+                    fees: allFees, cost: allCost, returns: allReturns
                 },
-                ordersList: ordersList
+                ordersList: ordersList,
+                cutoffDate: limitDate
             }
         });
+
+
 
     } catch (error) {
         console.error("❌ Noon Error:", error.response?.data || error.message);
