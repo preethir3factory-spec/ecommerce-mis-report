@@ -168,12 +168,16 @@ app.post('/api/fetch-sales', async (req, res) => {
     }
 
     // 3. Fallback: Fetch Items for recent orders to get SKUs if Invoice missing
-    // We limit this to the most recent 30 verified orders to avoid Rate Limiting (0.5/sec)
+    // We limit this checks depending on date range to balance speed/throttling.
+    // Deep Sync (customStartDate) or '30days' allows more throughput as chunks are smaller.
+    let skuCheckLimit = 30;
+    if (customStartDate || dateRange === '30days') skuCheckLimit = 200;
+
     const ordersNeedingSkus = orders.filter(o =>
         o.AmazonOrderId &&
         !invoiceMap[o.AmazonOrderId] &&
         o.OrderStatus !== 'Canceled'
-    ).slice(0, 30);
+    ).slice(0, skuCheckLimit);
 
     let amazonSkuMap = {}; // OrderID -> [SKUs]
     let masterCostMap = {};
@@ -555,10 +559,14 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
         let statusMsg = "Synced";
         const orderUrl = 'https://api.noon.partners/fbpi/v1/shipment/get';
 
-        // Get Date Limit
-        const dateRange = req.body.dateRange;
+        const { dateRange, customStartDate, customEndDate } = req.body;
         let limitDate = new Date();
-        if (dateRange === '1year') {
+        let endDate = null;
+
+        if (customStartDate) {
+            limitDate = new Date(customStartDate);
+            if (customEndDate) endDate = new Date(customEndDate);
+        } else if (dateRange === '1year') {
             limitDate.setFullYear(limitDate.getFullYear() - 1);
         } else if (dateRange === '30days') {
             limitDate.setDate(limitDate.getDate() - 30);
@@ -628,9 +636,29 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
                     await new Promise(r => setTimeout(r, 200)); // 200ms delay for speed
                 }
             }
+
+
+            // Filter by End Date (Since we paginate backwards from 'Now', verification is needed effectively)
+            // But Noon API usually returns latest first.
+            // When iterating chunks (e.g. Month 5 to 6), we ask Noon for data until Month 5 limit. 
+            // Noon gives most recent first. So it returns Month 12, 11... 6, 5.
+            // We need to discard 12..6 locally.
+
+            if (endDate) {
+                allNoonOrders = allNoonOrders.filter(o => {
+                    const d = new Date(o.order_created_at || o.order_date);
+                    return d <= endDate;
+                });
+            }
+            // Also filter start date strictness since we might have over-fetched a page
+            allNoonOrders = allNoonOrders.filter(o => {
+                const d = new Date(o.order_created_at || o.order_date);
+                return d >= limitDate;
+            });
+
             orders = allNoonOrders;
             if (!Array.isArray(orders)) orders = []; // Safety check
-            console.log(`✅ Noon Orders Retrieved: ${orders.length}`);
+            console.log(`✅ Noon Orders Retrieved: ${orders.length} (Filtered)`);
 
         } catch (orderErr) {
             console.error(`⚠️ Order Endpoint Failed (${orderErr.response ? orderErr.response.status : orderErr.message}) - URL: /order/v1/orders`);

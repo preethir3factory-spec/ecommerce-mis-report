@@ -1401,6 +1401,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Finalize
+        // Deduplicate Orders by ID
+        const uniqueOrders = new Map();
+        rawData.detailedOrders.forEach(o => {
+            if (o.id) uniqueOrders.set(o.id, o);
+        });
+        rawData.detailedOrders = Array.from(uniqueOrders.values());
+
         rawData.lastUpdated = new Date().toISOString();
         saveData();
         renderView();
@@ -1527,8 +1534,40 @@ document.addEventListener('DOMContentLoaded', () => {
                         }).catch(e => console.warn("Chunk fail", e));
                     }
 
-                    // Noon Chunk (Only if needed, Noon API is usually faster but let's be safe)
-                    // If we want Deep Sync for Noon too, we can add it here.
+                    // Noon Chunk
+                    if (result.noonBiz && result.noonKey && result.noonToken) {
+                        try {
+                            const noonRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    businessId: result.noonBiz, token: result.noonToken, keyId: result.noonKey,
+                                    customStartDate: chunk.start.toISOString(),
+                                    customEndDate: chunk.end.toISOString()
+                                })
+                            }).then(r => r.json());
+
+                            if (noonRes.success && noonRes.data && noonRes.data.ordersList) {
+                                const chunkOrders = noonRes.data.ordersList;
+                                // Smart Merge for Noon
+                                rawData.detailedOrders = rawData.detailedOrders.filter(o =>
+                                    o.platform !== 'Noon' ||
+                                    new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
+                                );
+                                chunkOrders.forEach(order => {
+                                    rawData.detailedOrders.push({
+                                        id: order.id, date: order.date, platform: 'Noon',
+                                        amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
+                                        status: order.status, currency: order.currency,
+                                        feeType: order.feeType,
+                                        invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                                    });
+                                });
+                            }
+                        } catch (e) {
+                            console.warn("Noon Chunk fail", e);
+                        }
+                    }
 
                     successCount++;
                 } catch (err) {
@@ -1538,6 +1577,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Slight delay
                 await new Promise(r => setTimeout(r, 1000));
             }
+
+            // Final Deduplication
+            const uniqueOrders = new Map();
+            rawData.detailedOrders.forEach(o => {
+                if (o.id) uniqueOrders.set(o.id, o);
+            });
+            rawData.detailedOrders = Array.from(uniqueOrders.values());
 
             if (statusEl) statusEl.textContent = "Deep Sync Complete!";
             rawData.lastUpdated = new Date().toISOString();
