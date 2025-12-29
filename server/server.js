@@ -159,7 +159,7 @@ app.post('/api/fetch-sales', async (req, res) => {
         console.log(`📡 Amazon: Syncing ${orderIdsToMatch.size} Invoices with Odoo...`);
         try {
             // For Amazon, we might not have SKUs easily, so we rely on Invoices mainly.
-            const invoices = await odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch));
+            const invoices = await odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch), 'Souq.com FZ LLC');
             invoiceMap = invoices;
             console.log(`✅ Odoo Sync: ${Object.keys(invoiceMap).length} Invoices matched.`);
         } catch (err) {
@@ -713,7 +713,7 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             console.log(`📡 Syncing Odoo (Costs & Invoices)...`);
             const [costs, invoices] = await Promise.all([
                 skusToFetch.size > 0 ? odooClient.fetchCostsForSkus(Array.from(skusToFetch)) : {},
-                orderIdsToMatch.size > 0 ? odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch)) : {}
+                orderIdsToMatch.size > 0 ? odooClient.fetchInvoicesByReferences(Array.from(orderIdsToMatch), 'Telco D DWC LLC') : {}
             ]);
             costMap = costs;
             invoiceMap = invoices;

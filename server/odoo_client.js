@@ -61,9 +61,37 @@ class OdooClient {
         });
     }
 
-    async fetchInvoicesByReferences(references) {
+    async fetchPartnerId(name) {
+        if (!name) return null;
+        if (this.partnerCache && this.partnerCache[name]) return this.partnerCache[name];
+
+        if (!this.uid) await this.connect();
+        const client = this.rpcConfig.secure
+            ? xmlrpc.createSecureClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' })
+            : xmlrpc.createClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' });
+
+        return new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [this.db, this.uid, this.password, 'res.partner', 'search', [[['name', '=', name]]], { limit: 1 }], (err, ids) => {
+                if (err) { console.error("Partner Fetch Error:", err); resolve(null); }
+                else {
+                    const id = ids && ids.length > 0 ? ids[0] : null;
+                    if (!this.partnerCache) this.partnerCache = {};
+                    this.partnerCache[name] = id;
+                    resolve(id);
+                }
+            });
+        });
+    }
+
+    async fetchInvoicesByReferences(references, partnerName = null) {
         if (!references || references.length === 0) return {};
         if (!this.uid) await this.connect();
+
+        let partnerId = null;
+        if (partnerName) {
+            partnerId = await this.fetchPartnerId(partnerName);
+            if (!partnerId) console.warn(`⚠️ Odoo: Partner '${partnerName}' not found. Verify spelling.`);
+        }
 
         const client = this.rpcConfig.secure
             ? xmlrpc.createSecureClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' })
@@ -75,11 +103,25 @@ class OdooClient {
 
         for (const batchRefs of batches) {
             const batchMap = await new Promise((resolve, reject) => {
-                // Modified Domain: Check Origin as well!
-                const domain = ['|', '|', ['name', 'in', batchRefs], ['reference', 'in', batchRefs], ['origin', 'in', batchRefs]];
+                // Modified Domain:
+                // If partnerId exists: [ '&', ['partner_id', '=', partnerId], '|', '|', ['name', 'in', batch], ['reference', 'in', batch], ['origin', 'in', batch] ]
+                // Else: ['|', '|', ['name', 'in', batch], ['reference', 'in', batch], ['origin', 'in', batch]]
+
+                let domain = ['|', '|', ['name', 'in', batchRefs], ['reference', 'in', batchRefs], ['origin', 'in', batchRefs]];
+                if (partnerId) {
+                    domain = ['&', ['partner_id', '=', partnerId], ...domain];
+                }
+
+                // Note: Odoo domain syntax for mixed operators can be tricky.
+                // Standard Polish notation:
+                // '&', A, '|', B, C  => A AND (B OR C)
+                // Here we have 3 ORs. 
+                // '|', '|', A, B, C => (A OR B) OR C => A OR B OR C
+                // So: '&', P, '|', '|', A, B, C => P AND (A OR B OR C)
+                // Correct.
 
                 client.methodCall('execute_kw', [this.db, this.uid, this.password, 'account.invoice', 'search_read', [domain],
-                { fields: ['name', 'reference', 'origin', 'date_invoice', 'amount_total', 'state', 'invoice_line_ids', 'number'] }
+                { fields: ['name', 'reference', 'origin', 'date_invoice', 'amount_total', 'state', 'invoice_line_ids', 'number', 'partner_id'] }
                 ], (error, invoices) => {
                     if (error) { console.error("Odoo Batch Fetch Error:", error); resolve({}); return; }
                     if (!invoices || !Array.isArray(invoices) || invoices.length === 0) { resolve({}); return; }
