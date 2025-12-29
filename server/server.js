@@ -247,9 +247,9 @@ app.post('/api/fetch-sales', async (req, res) => {
                 }
             };
 
-            // Run in chunks of 5
+            // Run in chunks of 2 (Reduced from 5 to avoid 429s)
             const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
-            const chunks = chunk(ordersNeedingSkus.map(o => o.AmazonOrderId), 5);
+            const chunks = chunk(ordersNeedingSkus.map(o => o.AmazonOrderId), 2);
 
             const allFoundSkus = new Set();
 
@@ -260,10 +260,10 @@ app.post('/api/fetch-sales', async (req, res) => {
                         amazonSkuMap[oid] = skus;
                         skus.forEach(s => allFoundSkus.add(s));
                     }
-                    await new Promise(r => setTimeout(r, 200)); // Slight delay per item
+                    await new Promise(r => setTimeout(r, 500)); // Delay per item
                 }));
-                // Wait 1s between batches to respect 0.5 TPS (approx)
-                await new Promise(r => setTimeout(r, 1000));
+                // Wait 1.5s between batches
+                await new Promise(r => setTimeout(r, 1500));
             }
 
             console.log(`📦 Amazon: Found ${allFoundSkus.size} unique SKUs in fallback batch.`);
