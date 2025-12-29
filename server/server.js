@@ -72,9 +72,34 @@ app.post('/api/generate-excel', (req, res) => {
 app.post('/api/fetch-sales', async (req, res) => {
     try {
         const { refreshToken, clientId, clientSecret, marketplaceId, dateRange, customStartDate, customEndDate } = req.body;
-        // ... (lines 74-112 skipped context) ...
+        // Generate Yesterday/Today Start Times for Bucketing
         const now = new Date();
-        // ...
+        const yesterdayStart = new Date(now); yesterdayStart.setDate(yesterdayStart.getDate() - 1); yesterdayStart.setHours(0, 0, 0, 0);
+        const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+
+        // 1. Exchange LWA (Login with Amazon) Token
+        // Ideally cache this token (expires in 1 hr)
+        const axios = require('axios');
+        let accessToken;
+        try {
+            const lwaResp = await axios.post('https://api.amazon.com/auth/o2/token', new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret
+            }));
+            accessToken = lwaResp.data.access_token;
+        } catch (authErr) {
+            console.error("Auth Failed:", authErr.response ? authErr.response.data : authErr.message);
+            return res.json({ success: false, error: "Amazon Auth Failed" });
+        }
+
+        const aws4 = require('aws4');
+        // Default to UAE if not provided
+        const targetMarketplaceId = marketplaceId || 'A2VIGQ35RCS4UG';
+
+        let createdAfter;
+        let cutoffDate;
 
         // Date Logic
         if (customStartDate) {
@@ -86,6 +111,7 @@ app.post('/api/fetch-sales', async (req, res) => {
             createdAfter = new Date(now);
             createdAfter.setDate(createdAfter.getDate() - 30);
         } else {
+            // Default to yesterday start
             createdAfter = yesterdayStart;
         }
 
@@ -101,6 +127,16 @@ app.post('/api/fetch-sales', async (req, res) => {
         if (createdBefore) {
             path += `&CreatedBefore=${createdBefore.toISOString()}`;
         }
+
+        // Define options for signing
+        const opts = {
+            service: 'execute-api',
+            region: AWS_REGION,
+            method: 'GET',
+            host: host,
+            path: path,
+            headers: { 'x-amz-access-token': accessToken, 'content-type': 'application/json' }
+        };
 
         aws4.sign(opts, { accessKeyId: AWS_ACCESS_KEY, secretAccessKey: AWS_SECRET_KEY });
 
