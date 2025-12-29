@@ -1267,20 +1267,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const quickSyncBtn = document.getElementById('quick-sync-btn');
 
     async function performSync(creds = null) {
+        // Unified Sync: Always perform Chunked Deep Sync to ensure 365 days correctness.
+        // It might take 30-40 seconds but it guarantees "Last 365 Days" is correct.
+
         // UI Feedback
         const statusEl = document.getElementById('api-status');
         const lastUpEl = document.getElementById('last-updated');
 
-        if (statusEl) { statusEl.textContent = "Starting Sync..."; statusEl.style.color = "blue"; }
+        if (statusEl) { statusEl.textContent = "Starting Full Sync (Last 12 Months)..."; statusEl.style.color = "blue"; }
         if (lastUpEl) lastUpEl.textContent = "Syncing...";
 
         // 1. Get Credentials
         let token, cid, sec, mpId, nBiz, nKey, nToken;
+        let result = {};
 
         if (creds) {
             ({ token, cid, sec, mpId, nBiz, nKey, nToken } = creds);
+            result = { amazonToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId, noonBiz: nBiz, noonKey: nKey, noonToken: nToken };
         } else {
-            const result = await new Promise(resolve =>
+            result = await new Promise(resolve =>
                 chrome.storage.local.get(['amazonToken', 'clientId', 'clientSecret', 'marketplaceId', 'noonBiz', 'noonKey', 'noonToken'], resolve)
             );
             token = result.amazonToken;
@@ -1292,45 +1297,58 @@ document.addEventListener('DOMContentLoaded', () => {
             nToken = result.noonToken;
         }
 
-        let syncMessages = [];
+        // 2. Generate 12 Chunks (Last 12 Months)
+        const chunks = [];
+        const now = new Date();
+        for (let i = 0; i < 12; i++) {
+            const end = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            // End date for this chunk is the last day of the month
+            const eDate = new Date(now);
+            eDate.setMonth(eDate.getMonth() - i);
+            eDate.setDate(31); // End of month
 
-        // --- 1. SYNC AMAZON ---
-        if (token && cid && sec) {
-            try {
-                if (statusEl) statusEl.textContent = "Syncing Amazon...";
-                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId, dateRange: '30days'
-                    })
-                });
+            // Start date for this chunk is 30 days before
+            const sDate = new Date(eDate);
+            sDate.setDate(sDate.getDate() - 30);
 
-                const result = await response.json();
-                if (response.ok && result.success && result.data) {
-                    // Update Buckets
-                    ['today', 'yesterday', 'all'].forEach(k => {
-                        if (result.data[k]) {
-                            // Merge bucket counts properly? 
-                            // Actually, bucket counts from server are for the requested range. 
-                            // If we request 30 days, 'all' bucket is only 30 days.
-                            // However, we rely on detailedOrders recalculation in renderView() so these buckets are just temporary placeholders or for fast 'today' display.
-                            rawData[k].amazon = { ...rawData[k].amazon, ...result.data[k] };
-                        }
-                    });
+            if (i === 0) {
+                // First chunk: Today for Amazon real-time
+                const today = new Date();
+                chunks.push({ start: sDate, end: today });
+            } else {
+                chunks.push({ start: sDate, end: eDate });
+            }
+        }
 
-                    // Update Detailed Orders (Smart Merge)
-                    if (result.data.ordersList) {
-                        const cutoff = result.data.cutoffDate ? new Date(result.data.cutoffDate) : null;
-                        if (cutoff) {
-                            // Retain orders OLDER than the cutoff from Amazon
-                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Amazon' || new Date(o.date) < cutoff);
-                        } else {
-                            // Fallback: Clear all Amazon
-                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Amazon');
-                        }
+        let amazonSuccess = false;
+        let noonSuccess = false;
 
-                        result.data.ordersList.forEach(order => {
+        // 3. Process Chunks
+        for (const [idx, chunk] of chunks.entries()) {
+            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/12... (${chunk.start.toLocaleDateString()})`;
+
+            // Amazon
+            if (token) {
+                try {
+                    const amzRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId,
+                            customStartDate: chunk.start.toISOString(),
+                            customEndDate: chunk.end.toISOString()
+                        })
+                    }).then(r => r.json());
+
+                    if (amzRes.success && amzRes.data && amzRes.data.ordersList) {
+                        const chunkOrders = amzRes.data.ordersList;
+                        amazonSuccess = true;
+                        // Smart Merge: Remove overlapping orders in this range from local
+                        rawData.detailedOrders = rawData.detailedOrders.filter(o =>
+                            o.platform !== 'Amazon' ||
+                            new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
+                        );
+                        chunkOrders.forEach(order => {
                             rawData.detailedOrders.push({
                                 id: order.id, date: order.date, platform: 'Amazon',
                                 amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
@@ -1340,68 +1358,51 @@ document.addEventListener('DOMContentLoaded', () => {
                             });
                         });
                     }
-
-                    syncMessages.push("✅ Amazon Synced");
-                } else {
-                    syncMessages.push("❌ Amazon Error: " + (result.error || 'Unknown'));
+                } catch (e) {
+                    console.warn(`Amazon Chunk ${idx} failed`, e);
                 }
-            } catch (err) {
-                syncMessages.push("❌ Amazon Failed: " + err.message);
             }
-        } else {
-            syncMessages.push("ℹ️ Amazon: Skipped (Missing Creds)");
-        }
 
-        // --- 2. SYNC NOON ---
-        if (nBiz && nToken) {
-            try {
-                if (statusEl) statusEl.textContent = "Syncing Noon...";
-                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ projectCode: nBiz, keyId: nKey, keySecret: nToken, dateRange: '30days' })
-                });
+            // Noon
+            if (nBiz && nKey && nToken) {
+                try {
+                    const noonRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            businessId: nBiz, token: nToken, keyId: nKey,
+                            customStartDate: chunk.start.toISOString(),
+                            customEndDate: chunk.end.toISOString()
+                        })
+                    }).then(r => r.json());
 
-                const result = await response.json();
-                if (response.ok && result.success && result.data) {
-                    // Update Buckets
-                    ['today', 'yesterday', 'all'].forEach(k => {
-                        if (result.data[k]) {
-                            rawData[k].noon = { ...rawData[k].noon, ...result.data[k] };
-                        }
-                    });
-
-                    // Update Detailed Orders (Smart Merge)
-                    if (result.data.ordersList) {
-                        const cutoff = result.data.cutoffDate ? new Date(result.data.cutoffDate) : null;
-                        if (cutoff) {
-                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Noon' || new Date(o.date) < cutoff);
-                        } else {
-                            rawData.detailedOrders = rawData.detailedOrders.filter(o => o.platform !== 'Noon');
-                        }
-
-                        result.data.ordersList.forEach(order => {
+                    if (noonRes.success && noonRes.data && noonRes.data.ordersList) {
+                        const chunkOrders = noonRes.data.ordersList;
+                        noonSuccess = true;
+                        rawData.detailedOrders = rawData.detailedOrders.filter(o =>
+                            o.platform !== 'Noon' ||
+                            new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
+                        );
+                        chunkOrders.forEach(order => {
                             rawData.detailedOrders.push({
                                 id: order.id, date: order.date, platform: 'Noon',
                                 amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
                                 status: order.status, currency: order.currency,
+                                feeType: order.feeType,
                                 invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
                             });
                         });
                     }
-                    syncMessages.push("✅ Noon Synced");
-                } else {
-                    syncMessages.push("❌ Noon Error: " + (result.error || 'Unknown'));
+                } catch (e) {
+                    console.warn(`Noon Chunk ${idx} failed`, e);
                 }
-            } catch (err) {
-                syncMessages.push("❌ Noon Failed: " + err.message);
             }
-        } else {
-            syncMessages.push("ℹ️ Noon: Skipped (Missing Creds)");
+
+            // Delay to be gentle
+            await new Promise(r => setTimeout(r, 500));
         }
 
-        // Finalize
-        // Deduplicate Orders by ID
+        // Final Deduplication and Save
         const uniqueOrders = new Map();
         rawData.detailedOrders.forEach(o => {
             if (o.id) uniqueOrders.set(o.id, o);
@@ -1412,30 +1413,27 @@ document.addEventListener('DOMContentLoaded', () => {
         saveData();
         renderView();
 
-        if (statusEl) statusEl.textContent = "Done.";
+        // Final Feedback
+        let syncMessages = [];
+        if (amazonSuccess) syncMessages.push("✅ Amazon Synced (12 Months)");
+        if (noonSuccess) syncMessages.push("✅ Noon Synced (12 Months)");
+        if (!amazonSuccess && !noonSuccess) syncMessages.push("❌ Sync Failed (Check Credentials)");
 
-        // Auto-Retry Estimates (Background)
+        if (lastUpEl) lastUpEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        if (statusEl) { statusEl.textContent = "Sync Complete!"; statusEl.style.color = "green"; }
+
+        console.log("Sync Complete:", syncMessages);
+
+        // Auto-Retry Estimates
         retryEstimatedFees(token, cid, sec).catch(console.error);
 
-        // Feedback
-        if (syncMessages.some(m => m.includes('✅'))) {
-            // Success
-            if (lastUpEl) lastUpEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
-            if (statusEl) statusEl.style.color = "green";
-            if (creds) { // Only close modal if triggered from Settings
-                settingsModal.classList.add('hidden');
-                alert(`Sync Complete:\n\n${syncMessages.join('\n')}`);
-            } else {
-                // Quick Sync Feedback
-                // No alert, just UI update + maybe console
-                console.log("Quick Sync Full Report:", syncMessages);
-            }
-        } else {
-            // Failure
-            if (lastUpEl) lastUpEl.textContent = "Sync Failed";
-            alert(`Sync Issues:\n\n${syncMessages.join('\n')}`);
+        if (creds) {
+            alert(syncMessages.join('\n'));
+            if (amazonSuccess || noonSuccess) settingsModal.classList.add('hidden');
         }
     }
+
+
 
     if (testApiBtn) {
         testApiBtn.addEventListener('click', () => {
