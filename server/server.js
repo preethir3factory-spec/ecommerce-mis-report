@@ -531,9 +531,12 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
 
     // Attempt to load credentials file
     try {
-        // 1. Load Creds (Prefer sensitive file)
+        // 1. Load Creds (Prefer config file first)
         let creds = {};
-        if (require('fs').existsSync('noon_credentials_sensitive.json')) {
+        if (require('fs').existsSync('noon_config.json')) {
+            // Priority: User's explicitly provided config
+            creds = JSON.parse(require('fs').readFileSync('noon_config.json', 'utf8'));
+        } else if (require('fs').existsSync('noon_credentials_sensitive.json')) {
             creds = JSON.parse(require('fs').readFileSync('noon_credentials_sensitive.json', 'utf8'));
         } else if (require('fs').existsSync('noon_credentials.json')) {
             creds = JSON.parse(require('fs').readFileSync('noon_credentials.json', 'utf8'));
