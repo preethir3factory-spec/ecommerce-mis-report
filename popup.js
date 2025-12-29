@@ -1450,6 +1450,104 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Deep Sync Logic (Chunked)
+    const deepSyncBtn = document.getElementById('deep-sync-btn');
+    if (deepSyncBtn) {
+        deepSyncBtn.addEventListener('click', async () => {
+            if (!confirm("Start Deep Sync?\n\nThis will fetch data month-by-month for the last 12 months. It may take 1-2 minutes. Please do not close the popup.")) return;
+
+            const statusEl = document.getElementById('api-status');
+            if (statusEl) statusEl.textContent = "Starting Deep Sync...";
+
+            const result = await new Promise(resolve =>
+                chrome.storage.local.get(['amazonToken', 'clientId', 'clientSecret', 'marketplaceId', 'noonBiz', 'noonKey', 'noonToken'], resolve)
+            );
+
+            // 1. Generate 12 chunks
+            const chunks = [];
+            const now = new Date();
+            for (let i = 0; i < 12; i++) {
+                const end = new Date(now.getFullYear(), now.getMonth() - i, 1); // Start of current month (going back)
+                // Actually end should be end of month? Let's do:
+                // Chunk 0: Today back to 30 days ago? No, let's do safe monthly blocks.
+                // Let's use strict Start/End dates.
+
+                // End date for this chunk
+                const eDate = new Date(now);
+                eDate.setMonth(eDate.getMonth() - i);
+                eDate.setDate(31); // Ensure end of month coverage (JS handles overflow)
+
+                // Start date for this chunk
+                const sDate = new Date(eDate);
+                sDate.setDate(sDate.getDate() - 30); // 30 day chunks
+
+                if (i === 0) {
+                    // First chunk: Today
+                    const today = new Date();
+                    chunks.push({ start: sDate, end: today });
+                } else {
+                    chunks.push({ start: sDate, end: eDate });
+                }
+            }
+
+            // 2. Iterate
+            let successCount = 0;
+            for (const [idx, chunk] of chunks.entries()) {
+                if (statusEl) statusEl.textContent = `Syncing Chunk ${idx + 1}/12... (${chunk.start.toLocaleDateString()})`;
+
+                try {
+                    // Amazon Chunk
+                    if (result.amazonToken) {
+                        await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                refreshToken: result.amazonToken, clientId: result.clientId, clientSecret: result.clientSecret, marketplaceId: result.marketplaceId,
+                                customStartDate: chunk.start.toISOString(),
+                                customEndDate: chunk.end.toISOString()
+                            })
+                        }).then(r => r.json()).then(res => {
+                            if (res.success && res.data && res.data.ordersList) {
+                                const chunkOrders = res.data.ordersList;
+                                // Smart Merge
+                                rawData.detailedOrders = rawData.detailedOrders.filter(o =>
+                                    o.platform !== 'Amazon' ||
+                                    new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
+                                );
+                                chunkOrders.forEach(order => {
+                                    rawData.detailedOrders.push({
+                                        id: order.id, date: order.date, platform: 'Amazon',
+                                        amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
+                                        status: order.status, currency: order.currency,
+                                        feeType: order.feeType, feeError: order.feeError,
+                                        invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                                    });
+                                });
+                            }
+                        }).catch(e => console.warn("Chunk fail", e));
+                    }
+
+                    // Noon Chunk (Only if needed, Noon API is usually faster but let's be safe)
+                    // If we want Deep Sync for Noon too, we can add it here.
+
+                    successCount++;
+                } catch (err) {
+                    console.error("Deep Sync Error:", err);
+                }
+
+                // Slight delay
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            if (statusEl) statusEl.textContent = "Deep Sync Complete!";
+            rawData.lastUpdated = new Date().toISOString();
+            saveData();
+            renderView();
+            alert("Deep Sync Finished. Check Dashboard.");
+        });
+    }
+
+    // Reuse performSync for normal buttons...
     // Retry Mechanism for Estimates
     async function retryEstimatedFees(token, cid, sec) {
         // Find recent orders (365 days) with Estimated fees

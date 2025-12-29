@@ -18,6 +18,14 @@
           <span id="last-updated" style="font-size: 0.7rem; color: #6b7280;">Updated: --</span>
         </div>
         <div class="action-buttons">
+          <button id="quick-sync-btn" class="icon-btn" aria-label="Sync Now" title="Sync Data" style="color:#0ea5e9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 4v6h-6"></path>
+              <path d="M1 20v-6h6"></path>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
           <input type="file" id="file-upload" accept=".csv, .xlsx, .xls" style="display: none;" />
           <button id="upload-btn" class="icon-btn" aria-label="Upload Data" title="Upload CSV">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -168,6 +176,14 @@
           <!-- Bars will be injected by JS -->
         </div>
       </div>
+
+      <div class="recent-section" style="margin-top: 15px;">
+        <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Recent Orders</h3>
+        <div id="recent-orders-list"
+          style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto;">
+          <!-- Order Cards Injected Here -->
+        </div>
+      </div>
     </main>
 
     <footer>
@@ -247,6 +263,10 @@
           <button id="test-api-btn" class="secondary-btn"
             style="background: #2563eb; color: white; border: none; padding: 10px; border-radius: 0.5rem; cursor: pointer; font-weight: bold;">
             Sync Live Data from Server 🚀
+          </button>
+          <button id="deep-sync-btn" class="secondary-btn"
+            style="background: #ea580c; color: white; border: none; padding: 10px; border-radius: 0.5rem; cursor: pointer; font-weight: bold; margin-top: 5px;">
+            Deep Sync (Last 365 Days) ⏳
           </button>
         </div>
         <p class="crypto-note">Data saved locally. We never see your keys.</p>
