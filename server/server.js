@@ -342,6 +342,7 @@ app.post('/api/fetch-sales', async (req, res) => {
 
                 ordersList.push({
                     id: o.AmazonOrderId,
+                    platform: 'Amazon',
                     date: o.PurchaseDate,
                     amount: amount,
                     fees: estimatedFee,
