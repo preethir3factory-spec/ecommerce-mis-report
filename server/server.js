@@ -167,8 +167,8 @@ app.post('/api/fetch-sales', async (req, res) => {
                 nextToken = nextResp.data.payload.NextToken;
                 pageCount++;
 
-                // Throttling: Wait 500ms between pages (Reduced from 2000ms for speed)
-                await new Promise(r => setTimeout(r, 500));
+                // Throttling: Wait 2000ms between pages to respect Amazon rate limits
+                await new Promise(r => setTimeout(r, 2000));
             }
             console.log(`   Total Orders Fetched: ${orders.length}`);
 
@@ -262,8 +262,8 @@ app.post('/api/fetch-sales', async (req, res) => {
                     }
                     await new Promise(r => setTimeout(r, 500)); // Delay per item
                 }));
-                // Wait 1.5s between batches
-                await new Promise(r => setTimeout(r, 1500));
+                // Wait 3s between batches to be extremely safe
+                await new Promise(r => setTimeout(r, 3000));
             }
 
             console.log(`📦 Amazon: Found ${allFoundSkus.size} unique SKUs in fallback batch.`);
