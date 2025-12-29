@@ -1512,7 +1512,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             body: JSON.stringify({
                                 refreshToken: result.amazonToken, clientId: result.clientId, clientSecret: result.clientSecret, marketplaceId: result.marketplaceId,
                                 customStartDate: chunk.start.toISOString(),
-                                customEndDate: chunk.end.toISOString()
+                                // For the first chunk (current month), omit end date to capture up to 'Now'
+                                customEndDate: idx === 0 ? null : chunk.end.toISOString()
                             })
                         }).then(r => r.json()).then(res => {
                             if (res.success && res.data && res.data.ordersList) {
@@ -1544,7 +1545,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 body: JSON.stringify({
                                     businessId: result.noonBiz, token: result.noonToken, keyId: result.noonKey,
                                     customStartDate: chunk.start.toISOString(),
-                                    customEndDate: chunk.end.toISOString()
+                                    customEndDate: idx === 0 ? null : chunk.end.toISOString()
                                 })
                             }).then(r => r.json());
 
