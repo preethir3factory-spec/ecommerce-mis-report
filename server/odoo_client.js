@@ -3,10 +3,10 @@ require('dotenv').config();
 
 class OdooClient {
     constructor() {
-        this.url = process.env.ODOO_URL;
-        this.db = process.env.ODOO_DB;
-        this.username = process.env.ODOO_USERNAME;
-        this.password = process.env.ODOO_PASSWORD;
+        this.url = process.env.ODOO_URL || 'https://erp.r3factory.com/';
+        this.db = process.env.ODOO_DB || 'r3_erp_db';
+        this.username = process.env.ODOO_USERNAME || 'preethi@r3factory.ae';
+        this.password = process.env.ODOO_PASSWORD || 'preethi@r3';
 
         if (!this.url) console.warn("Odoo URL not set in environment variables.");
 

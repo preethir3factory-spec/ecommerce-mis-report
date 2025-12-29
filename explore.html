@@ -178,6 +178,17 @@
                         <line x1="10" y1="14" x2="21" y2="3"></line>
                     </svg>
                 </a>
+                <a href="odoo_data.html" class="header-btn" style="background: #714B67;">
+                    Odoo Data
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <path
+                            d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                        </path>
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                    </svg>
+                </a>
             </div>
             <div>Data Source: <span id="data-status">Loading...</span></div>
         </header>
@@ -270,10 +281,12 @@
                         <tr>
                             <th>Date</th>
                             <th>Order ID</th>
-                            <th>Status</th>
+                            <th>Platform</th>
                             <th>Sales</th>
-                            <th>Refund</th>
                             <th>Fees</th>
+                            <th>Cost (Odoo)</th>
+                            <th>Margin</th>
+                            <th>Odoo Invoice</th>
                         </tr>
                     </thead>
                     <tbody id="orders-table-body">

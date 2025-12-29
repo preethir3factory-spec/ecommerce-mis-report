@@ -47,14 +47,21 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Filter Logic matches user request (Today, Yesterday, 30, 365)
+// Filter Logic matches user request (Today, Yesterday, 30, 365)
 function applyFilter(range) {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
 
-    // Yesterday
-    const yest = new Date(now);
-    yest.setDate(yest.getDate() - 1);
-    const yestStr = yest.toISOString().split('T')[0];
+    // Normalize "Today" to Local 00:00:00
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Normalize "Yesterday" to Local 00:00:00
+    const yestStart = new Date(todayStart);
+    yestStart.setDate(yestStart.getDate() - 1);
+    const yestEnd = new Date(yestStart);
+    yestEnd.setHours(23, 59, 59, 999);
 
     let filtered = [];
 
@@ -62,30 +69,58 @@ function applyFilter(range) {
         filtered = fullOrders;
     }
     else if (range === 'today') {
-        filtered = fullOrders.filter(o => o.date && o.date.startsWith(todayStr));
+        filtered = fullOrders.filter(o => {
+            if (!o.date) return false;
+            const d = new Date(o.date);
+            return d >= todayStart && d <= todayEnd;
+        });
     }
     else if (range === 'yesterday') {
-        filtered = fullOrders.filter(o => o.date && o.date.startsWith(yestStr));
+        filtered = fullOrders.filter(o => {
+            if (!o.date) return false;
+            const d = new Date(o.date);
+            return d >= yestStart && d <= yestEnd;
+        });
     }
     else if (range === '30days') {
         const threshold = new Date(now);
         threshold.setDate(threshold.getDate() - 30);
-        filtered = fullOrders.filter(o => new Date(o.date) >= threshold);
+        threshold.setHours(0, 0, 0, 0);
+        const endRange = new Date(now);
+        endRange.setHours(23, 59, 59, 999);
+
+        filtered = fullOrders.filter(o => {
+            if (!o.date) return false;
+            const d = new Date(o.date);
+            return d >= threshold && d <= endRange;
+        });
     }
     else if (range === '365days') {
         const threshold = new Date(now);
-        threshold.setDate(threshold.getDate() - 365);
-        filtered = fullOrders.filter(o => new Date(o.date) >= threshold);
+        threshold.setFullYear(threshold.getFullYear() - 1); // Use FullYear to match Popup
+        threshold.setHours(0, 0, 0, 0); // Include full start day
+        const endRange = new Date(now);
+        endRange.setHours(23, 59, 59, 999);
+
+        filtered = fullOrders.filter(o => {
+            if (!o.date) return false;
+            const d = new Date(o.date);
+            return d >= threshold && d <= endRange;
+        });
     }
     else if (range === 'custom') {
-        const start = document.getElementById('start-date').value;
-        const end = document.getElementById('end-date').value;
-        if (!start || !end) {
+        const startVal = document.getElementById('start-date').value;
+        const endVal = document.getElementById('end-date').value;
+        if (!startVal || !endVal) {
             alert("Please select Start and End dates.");
             return;
         }
+        // Input is YYYY-MM-DD
+        const start = new Date(startVal); start.setHours(0, 0, 0, 0);
+        const end = new Date(endVal); end.setHours(23, 59, 59, 999);
+
         filtered = fullOrders.filter(o => {
-            const d = o.date.split('T')[0];
+            const d = new Date(o.date);
             return d >= start && d <= end;
         });
     }
@@ -153,22 +188,30 @@ function renderTable(orders) {
 
     [...orders].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 50).forEach(o => {
         const isEst = (o.feeType && o.feeType.includes('Est'));
-        const typeLabel = o.feeType || 'Estimated';
-        const typeColor = isEst ? '#f59e0b' : '#10b981'; // Orange vs Green
 
-        const isRefund = o.amount < 0;
-        const salesDisplay = isRefund ? '-' : formatCurrency(o.amount);
-        const refundDisplay = isRefund ? formatCurrency(Math.abs(o.amount)) : '-';
+        // Calc Margin
+        const sale = parseFloat(o.amount) || 0;
+        const fee = parseFloat(o.fees) || 0;
+        const cost = parseFloat(o.cost) || 0;
+        const margin = sale - fee - cost;
+        const marginPercent = sale > 0 ? (margin / sale * 100).toFixed(1) : 0;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${o.date ? o.date.split('T')[0] : ''}</td>
-            <td>${o.id}</td>
-            <td>${o.status}</td>
-            <td>${salesDisplay}</td>
-            <td style="color: #ef4444;">${refundDisplay}</td>
-            <td style="color: #ef4444;">-${formatCurrency(o.fees)}</td>
-        `;
+                <td>${o.date ? o.date.split('T')[0] : ''}</td>
+                <td><span style="font-size:0.85em; font-weight:500;">${o.id}</span></td>
+                <td>${o.platform || 'Amazon'}</td>
+                <td>${formatCurrency(sale)}</td>
+                <td style="color:#ef4444">${formatCurrency(fee)}</td>
+                <td style="color:#6b7280">${cost > 0 ? formatCurrency(cost) : '-'}</td>
+                <td style="font-weight:600; color: ${margin > 0 ? '#10b981' : '#ef4444'}">
+                    ${formatCurrency(margin)} <span style="font-size:0.8em">(${marginPercent}%)</span>
+                </td>
+                <td style="font-size:0.85em; color:#4b5563;">
+                    ${o.invoiceRef || '-'} 
+                    ${o.invoiceStatus ? `<br><span style="font-size:0.75em; color:${o.invoiceStatus === 'paid' ? '#10b981' : '#f59e0b'}">${o.invoiceStatus}</span>` : ''}
+                </td>
+            `;
         tbody.appendChild(tr);
     });
 }
@@ -313,20 +356,32 @@ function downloadCSV() {
     }
 
     // Header
-    const headers = ["Date", "Platform", "Order ID", "Status", "Amount", "Fees", "Cost", "Currency", "Fee Type"];
+    const headers = ["Date", "Platform", "Order ID", "Status", "SKU (Noon Only)", "Amount", "Fees", "Cost (Odoo)", "Margin", "Margin %", "Fee Type", "Odoo Invoice", "Inv Status"];
 
     // Rows
-    const rows = currentFilteredOrders.map(o => [
-        o.date ? o.date.split('T')[0] : '',
-        o.platform,
-        o.id,
-        o.status,
-        o.amount,
-        o.fees,
-        o.cost,
-        o.currency || 'AED',
-        o.feeType || 'Estimated'
-    ]);
+    const rows = currentFilteredOrders.map(o => {
+        const sale = parseFloat(o.amount) || 0;
+        const fee = parseFloat(o.fees) || 0;
+        const cost = parseFloat(o.cost) || 0;
+        const margin = sale - fee - cost;
+        const marginP = sale > 0 ? (margin / sale * 100).toFixed(2) : 0;
+
+        return [
+            o.date ? o.date.split('T')[0] : '',
+            o.platform || 'Amazon',
+            o.id,
+            o.status,
+            o.skus || '',
+            sale.toFixed(2),
+            fee.toFixed(2),
+            cost.toFixed(2),
+            margin.toFixed(2),
+            marginP + '%',
+            o.feeType || 'Estimated',
+            o.invoiceRef || '',
+            o.invoiceStatus || ''
+        ];
+    });
 
     // Construct CSV String
     const csvContent = [

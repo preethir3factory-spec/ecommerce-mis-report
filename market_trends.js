@@ -101,7 +101,7 @@ function renderLists(data) {
                 <div class="product-info">
                     <div class="product-title" title="${item.name}">${item.name}</div>
                     <div class="product-meta">${item.brand || 'Generic'} • ${item.condition}</div>
-                    <div class="product-price">${(item.currency && item.price !== 'See Site') ? item.currency + ' ' : ''}${item.price}</div>
+                    <!-- Price Removed -->
                     <div class="product-rating">
                         <span>★ ${item.rating || 'N/A'}</span>
                         <span style="color:#9ca3af; font-size:0.75rem;">(${item.reviews || 0})</span>
