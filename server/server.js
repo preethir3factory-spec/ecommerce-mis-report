@@ -123,6 +123,7 @@ app.post('/api/fetch-sales', async (req, res) => {
         cutoffDate = createdAfter;
 
         const host = 'sellingpartnerapi-eu.amazon.com';
+        console.log(`📡 Fetching Amazon Orders CreatedAfter: ${createdAfter.toISOString()} (Marketplace: ${targetMarketplaceId})`);
         let path = `/orders/v0/orders?CreatedAfter=${createdAfter.toISOString()}&MarketplaceIds=${targetMarketplaceId}`;
         if (createdBefore) {
             path += `&CreatedBefore=${createdBefore.toISOString()}`;
@@ -282,6 +283,12 @@ app.post('/api/fetch-sales', async (req, res) => {
 
         // Process Orders Sequentially to handle Async Financial fetching
         for (const o of orders) {
+            if (!o.OrderTotal || !o.OrderTotal.Amount) {
+                if (o.OrderStatus !== 'Canceled') {
+                    console.log(`⚠️ Skipped Amazon Order ${o.AmazonOrderId} [${o.OrderStatus}]: No OrderTotal`);
+                }
+                continue;
+            }
             if (o.OrderTotal && o.OrderTotal.Amount) {
                 if (o.OrderStatus === 'Canceled') continue;
                 const amount = parseFloat(o.OrderTotal.Amount);
@@ -408,6 +415,7 @@ app.post('/api/fetch-sales', async (req, res) => {
                 cutoffDate: cutoffDate  // Send back cutoff so frontend can merge
             }
         });
+        console.log(`✅ Returned ${ordersList.length} processed orders to client.`);
 
     } catch (err) {
         console.error("Fetch/Amazon API Error:", err.message);
