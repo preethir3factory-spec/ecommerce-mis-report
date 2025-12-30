@@ -18,6 +18,17 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 3000;
 
+// Prevent Server Crash on Unhandled Errors
+process.on('uncaughtException', (err) => {
+    console.error('🔥 UNCAUGHT EXCEPTION:', err);
+    // Keep running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 UNHANDLED REJECTION:', reason);
+    // Keep running
+});
+
 // --- CONFIG ---
 const AWS_ACCESS_KEY = process.env.AWS_ACCESS_KEY;
 const AWS_SECRET_KEY = process.env.AWS_SECRET_KEY;
@@ -1136,6 +1147,9 @@ async function fetchWithRetry(url, options, retries = 3, backoff = 1000) {
     try {
         return await require('axios').get(url, options);
     } catch (err) {
+        if (err.response) {
+            console.error(`⚠️ HTTP Error ${err.response.status} at ${url}:`, JSON.stringify(err.response.data));
+        }
         if (retries > 0 && err.response && (err.response.status === 429 || err.response.status >= 500)) {
             console.warn(`⚠️ Request Failed (${err.response.status}). Retrying in ${backoff}ms...`);
             await new Promise(r => setTimeout(r, backoff));
