@@ -1,6 +1,8 @@
 // Global State
 let fullOrders = [];
 let currentFilteredOrders = [];
+let currentPage = 1;
+const itemsPerPage = 50;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Buttons
@@ -43,7 +45,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Download Listener
+    // Download Listener
     downloadBtn.addEventListener('click', downloadCSV);
+
+    // Pagination Listeners
+    document.getElementById('prev-page-btn').addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderTable(currentFilteredOrders);
+        }
+    });
+
+    document.getElementById('next-page-btn').addEventListener('click', () => {
+        const totalPages = Math.ceil(currentFilteredOrders.length / itemsPerPage);
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderTable(currentFilteredOrders);
+        }
+    });
 });
 
 // Filter Logic matches user request (Today, Yesterday, 30, 365)
@@ -126,6 +145,7 @@ function applyFilter(range) {
     }
 
     currentFilteredOrders = filtered;
+    currentPage = 1; // Reset to first page on filter change
     renderDashboard(filtered);
 }
 
@@ -186,7 +206,22 @@ function renderTable(orders) {
     const tbody = document.getElementById('orders-table-body');
     tbody.innerHTML = '';
 
-    [...orders].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 50).forEach(o => {
+    // Sort
+    const sortedOrders = [...orders].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Pagination Slicing
+    const totalItems = sortedOrders.length;
+    const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+
+    // Safety check
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    const pageOrders = sortedOrders.slice(start, end);
+
+    pageOrders.forEach(o => {
         const isEst = (o.feeType && o.feeType.includes('Est'));
 
         // Calc Margin
@@ -214,6 +249,29 @@ function renderTable(orders) {
             `;
         tbody.appendChild(tr);
     });
+
+    renderPaginationControls(totalItems);
+}
+
+function renderPaginationControls(totalItems) {
+    const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+    document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+
+    const prevBtn = document.getElementById('prev-page-btn');
+    const nextBtn = document.getElementById('next-page-btn');
+
+    if (prevBtn) {
+        prevBtn.disabled = currentPage <= 1;
+        // Style disabled state
+        prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+        prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+    }
+
+    if (nextBtn) {
+        nextBtn.disabled = currentPage >= totalPages;
+        nextBtn.style.opacity = nextBtn.disabled ? '0.5' : '1';
+        nextBtn.style.cursor = nextBtn.disabled ? 'not-allowed' : 'pointer';
+    }
 }
 
 function formatCurrency(num) {

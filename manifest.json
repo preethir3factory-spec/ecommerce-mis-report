@@ -8,7 +8,8 @@
     "default_title": "E-commerce MIS Report"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "https://*.amazon.com/*",

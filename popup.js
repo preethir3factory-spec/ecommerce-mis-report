@@ -14,6 +14,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentDate = 'today';
     let currentPlatform = 'all';
 
+    // API CONFIGURATION
+    // const BASE_URL = 'https://ecommerce-mis-report.onrender.com'; // Production
+    const BASE_URL = 'http://localhost:3000'; // Local Development
+
+
     // UI Elements
     const salesEl = document.getElementById('sales-value');
     const costEl = document.getElementById('cost-value');
@@ -85,7 +90,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveData() {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            chrome.storage.local.set({ misData: rawData });
+            try {
+                // Check estimate size
+                const size = JSON.stringify(rawData).length;
+                console.log(`Saving Data... Size approx: ${(size / 1024).toFixed(2)} KB`);
+
+                chrome.storage.local.set({ misData: rawData }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.error("Storage Save Failed:", chrome.runtime.lastError);
+                        alert("Error saving data: " + chrome.runtime.lastError.message);
+                    } else {
+                        console.log("Data Saved Successfully.");
+                    }
+                });
+            } catch (e) {
+                console.error("Save Helper Error:", e);
+            }
         }
     }
 
@@ -132,103 +152,90 @@ document.addEventListener('DOMContentLoaded', () => {
             liveSkus: 0, totalSkus: 0, weekly: []
         };
 
-        if (currentDate === 'custom' || currentDate === 'month' || currentDate === 'all') {
-            let start, end;
+        // UNIFIED RENDER LOGIC: Always calculate from detailedOrders
+        // This ensures API-synced data (which lives in detailedOrders) is reflected in 'Today'/'Yesterday' views.
 
-            if (currentDate === 'month') {
-                const now = new Date();
-                start = new Date(now.getFullYear(), now.getMonth(), 1);
-                end = new Date();
-            } else if (currentDate === 'all') {
-                const now = new Date();
-                start = new Date(now);
-                start.setFullYear(start.getFullYear() - 1); // Last 365 Days
-                end = new Date();
-            } else {
-                // Custom
-                const startEl = document.getElementById('date-start');
-                const endEl = document.getElementById('date-end');
-                if (startEl && endEl && startEl.value && endEl.value) {
-                    start = new Date(startEl.value);
-                    end = new Date(endEl.value);
-                }
-            }
+        let start, end;
+        const now = new Date();
 
-            // Recalculate if range exists
-            if (start && end) {
-                // Ensure Local Time range coverage
-                start.setHours(0, 0, 0, 0);
-                end.setHours(23, 59, 59, 999);
-
-                // FIX: Auto-swap if range is reversed (User Error Handing)
-                if (start > end) {
-                    console.warn(`[Filter] Detected reversed range: ${start.toLocaleDateString()} > ${end.toLocaleDateString()}. Swapping.`);
-                    const temp = start; start = end; end = temp;
-
-                    // Update UI input values to reflect the swap (String format to avoid TZ issues)
-                    if (document.getElementById('date-start')) {
-                        const sY = start.getFullYear();
-                        const sM = String(start.getMonth() + 1).padStart(2, '0');
-                        const sD = String(start.getDate()).padStart(2, '0');
-                        document.getElementById('date-start').value = `${sY}-${sM}-${sD}`;
-                    }
-                    if (document.getElementById('date-end')) {
-                        const eY = end.getFullYear();
-                        const eM = String(end.getMonth() + 1).padStart(2, '0');
-                        const eD = String(end.getDate()).padStart(2, '0');
-                        document.getElementById('date-end').value = `${eY}-${eM}-${eD}`;
-                    }
-                }
-
-                console.log(`[Filter] Range: ${start.toLocaleString()} to ${end.toLocaleString()}`);
-
-                if (rawData.detailedOrders) {
-                    rawData.detailedOrders.forEach(o => {
-                        const oDate = new Date(o.date);
-                        if (oDate >= start && oDate <= end) {
-                            if (currentPlatform === 'all' || o.platform.toLowerCase() === currentPlatform) {
-                                // Unified Logic to match Dashboard
-                                stats.sales += o.amount;
-                                stats.fees += (o.fees || 0);
-                                stats.cost += (o.cost || 0);
-
-                                if (o.amount >= 0) {
-                                    stats.sold++;
-                                } else {
-                                    stats.returns += Math.abs(o.amount);
-                                }
-                            }
-                        }
-                    });
-                }
-
-            }
-
-            // Fallback for SKUs (Use 'all' values)
-            const amzAll = rawData.all.amazon || {};
-            const noonAll = rawData.all.noon || {};
-            stats.liveSkus = (amzAll.liveSkus || 0) + (noonAll.liveSkus || 0);
-            stats.totalSkus = (amzAll.totalSkus || 0) + (noonAll.totalSkus || 0);
-
-        } else {
-            const dayData = rawData[currentDate];
-            if (currentPlatform === 'all') {
-                const amz = dayData.amazon;
-                const noon = dayData.noon;
-                stats = {
-                    sales: amz.sales + noon.sales,
-                    cost: amz.cost + noon.cost,
-                    fees: (amz.fees || 0) + (noon.fees || 0),
-                    returns: (amz.returns || 0) + (noon.returns || 0),
-                    sold: amz.sold + noon.sold,
-                    liveSkus: (amz.liveSkus || 0) + (noon.liveSkus || 0),
-                    totalSkus: (amz.totalSkus || 0) + (noon.totalSkus || 0),
-                    weekly: amz.weekly && noon.weekly ? amz.weekly.map((val, idx) => (val + noon.weekly[idx]) / 2) : []
-                };
-            } else {
-                stats = dayData[currentPlatform];
+        if (currentDate === 'today') {
+            start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 00:00:00 Local
+            end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        } else if (currentDate === 'yesterday') {
+            const y = new Date(now);
+            y.setDate(y.getDate() - 1);
+            start = new Date(y.getFullYear(), y.getMonth(), y.getDate());
+            end = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 23, 59, 59, 999);
+        } else if (currentDate === 'month') {
+            start = new Date(now.getFullYear(), now.getMonth(), 1);
+            end = new Date();
+        } else if (currentDate === 'all') {
+            start = new Date(now);
+            start.setFullYear(start.getFullYear() - 1); // Last 365 Days
+            end = new Date();
+        } else if (currentDate === 'custom') {
+            const startEl = document.getElementById('date-start');
+            const endEl = document.getElementById('date-end');
+            if (startEl && endEl && startEl.value && endEl.value) {
+                start = new Date(startEl.value);
+                end = new Date(endEl.value);
             }
         }
+
+        if (start && end) {
+            // Ensure Local Time range coverage
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 59, 999);
+
+            // FIX: Auto-swap if range is reversed
+            if (start > end) {
+                const temp = start; start = end; end = temp;
+            }
+
+            // Calculate Stats from Detailed Orders
+            if (rawData.detailedOrders) {
+                rawData.detailedOrders.forEach(o => {
+                    const oDate = new Date(o.date);
+                    if (oDate >= start && oDate <= end) {
+                        if (currentPlatform === 'all' || o.platform.toLowerCase() === currentPlatform) {
+                            const sAmt = parseFloat(o.amount) || 0;
+                            stats.sales += sAmt;
+                            stats.fees += parseFloat(o.fees || 0);
+                            stats.cost += parseFloat(o.cost || 0);
+
+                            if (sAmt >= 0) {
+                                stats.sold++;
+                            } else {
+                                stats.returns += Math.abs(sAmt);
+                            }
+                        }
+                    }
+                });
+
+                // Generate Weekly Chart Data (Last 7 Days)
+                // This allows the chart to work even without 'bucket' data
+                const chartDays = 7;
+                stats.weekly = new Array(chartDays).fill(0);
+                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+                rawData.detailedOrders.forEach(o => {
+                    const oDate = new Date(o.date);
+                    // Calculate diff in days from today
+                    const diffTime = todayStart - oDate;
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+                    // diffDays = 0 means today, 1 means yesterday...
+                    // We want index 6 = Today, index 5 = Yesterday ... index 0 = 6 days ago
+                    // So index = 6 - diffDays
+                    if (diffDays >= 0 && diffDays < chartDays) {
+                        if (currentPlatform === 'all' || o.platform.toLowerCase() === currentPlatform) {
+                            stats.weekly[chartDays - 1 - diffDays] += (parseFloat(o.amount) || 0);
+                        }
+                    }
+                });
+            }
+        }
+
 
         // The following block is inserted/modified based on the instruction
         let totalSales = stats.sales;
@@ -1063,7 +1070,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (apiStatus) apiStatus.textContent = "Generating Excel...";
 
         try {
-            const response = await fetch('https://ecommerce-mis-report.onrender.com/api/generate-excel', {
+            const response = await fetch(`${BASE_URL}/api/generate-excel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ rows: rows })
@@ -1107,7 +1114,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     try {
                         // Send to local server for conversion
-                        const resp = await fetch('https://ecommerce-mis-report.onrender.com/api/convert-excel', {
+                        const resp = await fetch(`${BASE_URL}/api/convert-excel`, {
                             method: 'POST',
                             body: formData
                         });
@@ -1333,19 +1340,25 @@ document.addEventListener('DOMContentLoaded', () => {
             // Amazon
             if (token) {
                 try {
-                    const amzRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
+                    const amzRes = await fetch(`${BASE_URL}/api/fetch-sales`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId,
                             customStartDate: chunk.start.toISOString(),
-                            customEndDate: chunk.end.toISOString()
+                            customEndDate: idx === 0 ? null : chunk.end.toISOString()
                         })
                     }).then(r => r.json());
 
                     if (amzRes.success && amzRes.data && amzRes.data.ordersList) {
                         const chunkOrders = amzRes.data.ordersList;
                         amazonSuccess = true;
+
+                        console.log(`CHUNK ${idx + 1}: Received ${chunkOrders.length} Amazon orders.`);
+                        if (chunkOrders.length > 0) {
+                            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/12... Found ${chunkOrders.length} orders`;
+                        }
+
                         // Smart Merge: Remove overlapping orders in this range from local
                         rawData.detailedOrders = rawData.detailedOrders.filter(o =>
                             o.platform !== 'Amazon' ||
@@ -1360,6 +1373,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                 invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
                             });
                         });
+                    } else {
+                        console.warn(`CHUNK ${idx + 1}: Amazon success=false or no data`, amzRes);
+                        if (amzRes && amzRes.error && idx === 0 && !amzRes.error.includes('429')) {
+                            // Only alert on critical errors, ignore Rate Limits (429) as we continue syncing other chunks
+                            // We also rely on the server logs for 429 details
+                            alert(`Amazon Sync Error: ${amzRes.error}`);
+                        }
                     }
                 } catch (e) {
                     console.warn(`Amazon Chunk ${idx} failed`, e);
@@ -1369,7 +1389,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Noon
             if (nBiz && nKey && nToken) {
                 try {
-                    const noonRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
+                    const noonRes = await fetch(`${BASE_URL}/api/fetch-noon-sales`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1401,8 +1421,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Delay to be gentle
-            await new Promise(r => setTimeout(r, 500));
+            // Delay to be gentle (Increased to prevent 429 Rate Limits)
+            await new Promise(r => setTimeout(r, 2500));
         }
 
         // Final Deduplication and Save
@@ -1506,7 +1526,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     // Amazon Chunk
                     if (result.amazonToken) {
-                        await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-sales', {
+                        await fetch(`${BASE_URL}/api/fetch-sales`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1539,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Noon Chunk
                     if (result.noonBiz && result.noonKey && result.noonToken) {
                         try {
-                            const noonRes = await fetch('https://ecommerce-mis-report.onrender.com/api/fetch-noon-sales', {
+                            const noonRes = await fetch(`${BASE_URL}/api/fetch-noon-sales`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
@@ -1576,8 +1596,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error("Deep Sync Error:", err);
                 }
 
-                // Slight delay
-                await new Promise(r => setTimeout(r, 1000));
+                // Slight delay (Increased to prevent 429 Rate Limits)
+                await new Promise(r => setTimeout(r, 3000));
             }
 
             // Final Deduplication
@@ -1622,7 +1642,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (const chunk of chunks) {
             try {
-                const response = await fetch('https://ecommerce-mis-report.onrender.com/api/refresh-fees', {
+                const response = await fetch(`${BASE_URL}/api/refresh-fees`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
