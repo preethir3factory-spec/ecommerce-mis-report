@@ -239,6 +239,49 @@ class OdooClient {
         }
         return masterInvoiceMap;
     }
+
+
+    async fetchRetailStock() {
+        if (!this.uid) await this.connect();
+        const client = this.rpcConfig.secure ? xmlrpc.createSecureClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' }) : xmlrpc.createClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' });
+
+        return new Promise((resolve, reject) => {
+            // 1. Find Lots where x_parent_loc is 'retail_loc'
+            // This custom field tracks items assigned to Retail
+            client.methodCall('execute_kw', [this.db, this.uid, this.password, 'stock.production.lot', 'search_read',
+            [[['x_parent_loc', '=', 'retail_loc']]],
+            { fields: ['id'], limit: 5000 }
+            ], (err, lots) => {
+                if (err) { console.error("Lot Search Error:", err); resolve([]); return; }
+                if (!lots || lots.length === 0) { resolve([]); return; }
+
+                const lotIds = lots.map(l => l.id);
+
+                // 2. Find Quants for these Lots
+                // Filter: Quantity = 1 (Serialized), Internal Location
+                client.methodCall('execute_kw', [this.db, this.uid, this.password, 'stock.quant', 'search_read',
+                [[['lot_id', 'in', lotIds], ['quantity', '=', 1], ['location_id.usage', '=', 'internal']]],
+                { fields: ['product_id', 'quantity', 'location_id', 'lot_id'], limit: 5000 }
+                ], (err2, quants) => {
+                    if (err2) { console.error("Quant Search Error:", err2); resolve([]); return; }
+                    resolve(quants);
+                });
+            });
+        });
+    }
+    async searchLocations(term) {
+        if (!this.uid) await this.connect();
+        const client = this.rpcConfig.secure ? xmlrpc.createSecureClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' }) : xmlrpc.createClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' });
+
+        return new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [this.db, this.uid, this.password, 'stock.location', 'search_read',
+            [[['name', 'ilike', term]]],
+            { fields: ['name', 'complete_name'] }
+            ], (err, res) => {
+                if (err) reject(err); else resolve(res);
+            });
+        });
+    }
 }
 
 module.exports = new OdooClient();

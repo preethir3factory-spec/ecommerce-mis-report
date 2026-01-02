@@ -464,6 +464,28 @@ app.get('/api/odoo/products', async (req, res) => {
     }
 });
 
+app.get('/api/odoo/retail-stock', async (req, res) => {
+    try {
+        const quants = await odooClient.fetchRetailStock();
+
+        // Odoo quants usually don't have 'sku' (default_code) needed for display unless we fetch product
+        // But for now let's just show Name and Qty
+        const mapped = quants.map(q => ({
+            id: q.id,
+            product_id: q.product_id ? q.product_id[0] : null,
+            name: q.product_id ? q.product_id[1] : 'Unknown Product',
+            qty: q.quantity,
+            location: q.location_id ? q.location_id[1] : 'Unknown',
+            lot: q.lot_id ? q.lot_id[1] : null
+        }));
+
+        res.json({ success: true, count: mapped.length, data: mapped });
+    } catch (err) {
+        console.error("Retail Stock API Error:", err);
+        res.status(500).json({ success: false, error: "Failed to fetch retail stock", details: err.message });
+    }
+});
+
 // 3. Refresh Fees Endpoint (For Retry Mechanism)
 app.post('/api/refresh-fees', async (req, res) => {
     const { refreshToken, clientId, clientSecret, orderIds } = req.body;
