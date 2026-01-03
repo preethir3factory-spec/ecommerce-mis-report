@@ -102,23 +102,32 @@ class OdooClient {
         const masterInvoiceMap = {};
 
         for (const batchRefs of batches) {
-            const batchMap = await new Promise((resolve, reject) => {
-                // Modified Domain:
-                // If partnerId exists: [ '&', ['partner_id', '=', partnerId], '|', '|', ['name', 'in', batch], ['reference', 'in', batch], ['origin', 'in', batch] ]
-                // Else: ['|', '|', ['name', 'in', batch], ['reference', 'in', batch], ['origin', 'in', batch]]
+            // STEP 1: Pre-fetch Sale Orders to find indirect links (Amazon ID -> SO Name)
+            const soMap = {};
+            try {
+                await new Promise((resolve) => {
+                    client.methodCall('execute_kw', [this.db, this.uid, this.password, 'sale.order', 'search_read',
+                    [[['client_order_ref', 'in', batchRefs]]],
+                    { fields: ['name', 'client_order_ref'] }
+                    ], (e, r) => {
+                        if (!e && Array.isArray(r)) {
+                            r.forEach(so => {
+                                if (so.name && so.client_order_ref) soMap[so.name] = so.client_order_ref;
+                            });
+                        }
+                        resolve();
+                    });
+                });
+            } catch (e) { console.error("SO Lookup Error:", e); }
 
-                let domain = ['|', '|', ['name', 'in', batchRefs], ['reference', 'in', batchRefs], ['origin', 'in', batchRefs]];
+            // STEP 2: Fetch Invoices
+            const searchList = [...batchRefs, ...Object.keys(soMap)];
+
+            const batchMap = await new Promise((resolve, reject) => {
+                let domain = ['|', '|', ['name', 'in', searchList], ['reference', 'in', searchList], ['origin', 'in', searchList]];
                 if (partnerId) {
                     domain = ['&', ['partner_id', '=', partnerId], ...domain];
                 }
-
-                // Note: Odoo domain syntax for mixed operators can be tricky.
-                // Standard Polish notation:
-                // '&', A, '|', B, C  => A AND (B OR C)
-                // Here we have 3 ORs. 
-                // '|', '|', A, B, C => (A OR B) OR C => A OR B OR C
-                // So: '&', P, '|', '|', A, B, C => P AND (A OR B OR C)
-                // Correct.
 
                 client.methodCall('execute_kw', [this.db, this.uid, this.password, 'account.invoice', 'search_read', [domain],
                 { fields: ['name', 'reference', 'origin', 'date_invoice', 'amount_total', 'state', 'invoice_line_ids', 'number', 'partner_id'] }
@@ -138,6 +147,11 @@ class OdooClient {
                             if (batchRefs.includes(inv.name)) key = inv.name;
                             else if (batchRefs.includes(inv.reference)) key = inv.reference;
                             else if (batchRefs.includes(inv.origin)) key = inv.origin;
+
+                            // Check SO Map
+                            if (!key && soMap[inv.origin] && batchRefs.includes(soMap[inv.origin])) {
+                                key = soMap[inv.origin];
+                            }
 
                             if (key) {
                                 inv.original_name = inv.name;
@@ -185,6 +199,11 @@ class OdooClient {
                                     if (batchRefs.includes(inv.name)) key = inv.name;
                                     else if (batchRefs.includes(inv.reference)) key = inv.reference;
                                     else if (batchRefs.includes(inv.origin)) key = inv.origin;
+
+                                    // Check SO Map
+                                    if (!key && soMap[inv.origin] && batchRefs.includes(soMap[inv.origin])) {
+                                        key = soMap[inv.origin];
+                                    }
 
                                     if (key) {
                                         inv.lines = linesByInv[inv.id] || [];

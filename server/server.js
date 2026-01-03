@@ -11,6 +11,7 @@ const { CookieJar } = require('tough-cookie');
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public')); // Serve Frontend
 
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
@@ -82,7 +83,12 @@ app.post('/api/generate-excel', (req, res) => {
 // 2. Fetch Amazon Orders
 app.post('/api/fetch-sales', async (req, res) => {
     try {
-        const { refreshToken, clientId, clientSecret, marketplaceId, dateRange, customStartDate, customEndDate } = req.body;
+        let { refreshToken, clientId, clientSecret, marketplaceId, dateRange, customStartDate, customEndDate } = req.body;
+        // Env Fallbacks for Web App
+        refreshToken = refreshToken || process.env.AMAZON_REFRESH_TOKEN;
+        clientId = clientId || process.env.AMAZON_CLIENT_ID;
+        clientSecret = clientSecret || process.env.AMAZON_CLIENT_SECRET;
+        marketplaceId = marketplaceId || process.env.AMAZON_MARKETPLACE_ID;
         // Generate Yesterday/Today Start Times for Bucketing
         const now = new Date();
         const yesterdayStart = new Date(now); yesterdayStart.setDate(yesterdayStart.getDate() - 1); yesterdayStart.setHours(0, 0, 0, 0);
@@ -488,7 +494,10 @@ app.get('/api/odoo/retail-stock', async (req, res) => {
 
 // 3. Refresh Fees Endpoint (For Retry Mechanism)
 app.post('/api/refresh-fees', async (req, res) => {
-    const { refreshToken, clientId, clientSecret, orderIds } = req.body;
+    let { refreshToken, clientId, clientSecret, orderIds } = req.body;
+    refreshToken = refreshToken || process.env.AMAZON_REFRESH_TOKEN;
+    clientId = clientId || process.env.AMAZON_CLIENT_ID;
+    clientSecret = clientSecret || process.env.AMAZON_CLIENT_SECRET;
 
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
         return res.json({ success: true, data: [] });
@@ -583,9 +592,9 @@ app.post('/api/fetch-noon-sales', async (req, res) => {
             creds = JSON.parse(require('fs').readFileSync('noon_credentials.json', 'utf8'));
         }
 
-        const private_key = creds.private_key || req.body.keySecret;
-        const key_id = creds.key_id || req.body.keyId;
-        let project_code = creds.project_code || req.body.projectCode || creds.default_project_code;
+        const private_key = creds.private_key || req.body.keySecret || process.env.NOON_PRIVATE_KEY;
+        const key_id = creds.key_id || req.body.keyId || process.env.NOON_KEY_ID;
+        let project_code = creds.project_code || req.body.projectCode || creds.default_project_code || process.env.NOON_PROJECT_CODE;
 
         // Sanitize Project Code (Remove 'PRJ' or 'p' prefix)
         let cleanProjectCode = project_code;
@@ -974,8 +983,9 @@ app.post('/api/fetch-market-trends', async (req, res) => {
         // 1. AMAZON SCRAPE
         try {
             console.log("   Fetching Amazon...");
-            // Amazon Scraper: Focus on "Renewed" Best Sellers
-            const amzUrl = 'https://www.amazon.ae/s?k=renewed&rh=n%3A11531063031&s=exact-aware-popularity-rank';
+            // Amazon Scraper: Focus on "Renewed" + Electronics Keywords
+            // Keywords: laptop, mobile, tablet, console
+            const amzUrl = 'https://www.amazon.ae/s?k=renewed+smartphone+laptop+tablet+console&s=exact-aware-popularity-rank';
 
             const amzResp = await axios.get(amzUrl, {
                 headers: {
@@ -1042,90 +1052,78 @@ app.post('/api/fetch-market-trends', async (req, res) => {
             console.error("   Amazon Scrape Failed:", amzErr.message);
         }
 
-        // 2. NOON SCRAPE (Improved Headers & Price Extraction)
+        // 2. NOON SCRAPE (Direct Catalog API - Robust)
         try {
-            console.log("   Fetching Noon (Top-Selling Renewed)...");
-            const noonUrl = `https://www.noon.com/uae-en/search?q=renewed&sort[by]=popularity&limit=50`;
+            console.log("   Fetching Noon (Top-Selling Renewed Electronics via API)...");
+            // API Endpoint used by Noon frontend - Added keywords for electronics
+            const noonUrl = 'https://www.noon.com/_svc/catalog/api/search?limit=50&q=renewed%20mobile%20laptop%20tablet%20gaming&sort[by]=popularity&sort[dir]=desc';
 
             const noonResp = await axios.get(noonUrl, {
                 headers: {
                     'User-Agent': getRandomUA(),
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept': 'application/json, text/plain, */*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Referer': 'https://www.google.com/'
+                    'Referer': 'https://www.noon.com/uae-en/',
+                    'Origin': 'https://www.noon.com',
+                    'x-locale': 'en-ae',
+                    'x-cms': 'v2',
+                    'x-platform': 'web'
                 },
-                timeout: 20000 // Extended to 20s
+                timeout: 10000
             });
 
-            const $n = cheerio.load(noonResp.data);
+            if (noonResp.data && noonResp.data.hits && Array.isArray(noonResp.data.hits)) {
+                const hits = noonResp.data.hits;
+                console.log(`   Fetched ${hits.length} Noon hits via API.`);
 
-            // Strategy: JSON Extraction from __NEXT_DATA__
-            const scriptContent = $n('script[id="__NEXT_DATA__"]').html();
-            if (scriptContent) {
-                try {
-                    const jsonData = JSON.parse(scriptContent);
-                    const hits = jsonData?.props?.pageProps?.catalog?.hits || [];
-                    console.log(`   Found ${hits.length} Noon hits via NEXT_DATA.`);
+                hits.slice(0, 20).forEach((hit) => {
+                    const baseTitle = hit.name;
+                    // Additional check for variant info if available in different fields
+                    const fullTitle = baseTitle;
 
-                    hits.slice(0, 20).forEach((hit) => {
-                        const baseTitle = hit.product_title || hit.name;
-                        const variantInfo = hit.standard_size || hit.size || hit.color_family || '';
-                        const fullTitle = variantInfo ? `${baseTitle} (${variantInfo})` : baseTitle;
+                    const imageKey = hit.image_key;
+                    const image = imageKey ? `https://f.nooncdn.com/products/tr:n-t_240/${imageKey}.jpg` : null;
 
-                        const imageKey = hit.image_key;
-                        const image = imageKey ? `https://f.nooncdn.com/products/tr:n-t_240/${imageKey}.jpg` : null;
+                    // Price Extraction
+                    let price = hit.sale_price || hit.price || 0;
+                    let formattedPrice = price > 0 ? `AED ${price}` : 'Check on Noon';
 
-                        // Price Extraction
-                        let price = hit.sale_price || hit.price || 0;
-                        let formattedPrice = price > 0 ? `AED ${price}` : 'Check on Noon';
-
-                        // URL Construction (Direct Product Link)
-                        // Ensure logic handles missing 'uae-en' or leading slash
-                        let pLink = hit.url;
-                        if (pLink) {
-                            if (!pLink.startsWith('http')) {
-                                const path = pLink.startsWith('/') ? pLink : '/' + pLink;
-                                pLink = `https://www.noon.com/uae-en${path.replace('/uae-en', '')}`;
-                            }
-                        } else {
-                            pLink = `https://www.noon.com/uae-en/p/${hit.sku || hit.sku_config}`;
+                    // URL Construction
+                    let pLink = hit.url;
+                    if (pLink) {
+                        if (!pLink.startsWith('http')) {
+                            const path = pLink.startsWith('/') ? pLink : '/' + pLink;
+                            pLink = `https://www.noon.com/uae-en${path.replace('/uae-en', '')}`;
                         }
+                    } else {
+                        pLink = `https://www.noon.com/uae-en/p/${hit.sku}`;
+                    }
 
-                        if (baseTitle && image) {
-                            results.noon.push({
-                                rank: results.noon.length + 1,
-                                product_id: hit.sku || 'NOON' + results.noon.length,
-                                name: fullTitle,
-                                brand: hit.brand || 'Noon',
-                                price: formattedPrice,
-                                currency: 'AED',
-                                condition: 'Refurbished',
-                                rating: hit.rating?.average || 'N/A',
-                                reviews: hit.rating?.count || '0',
-                                recent_sales: '',
-                                image_url: image,
-                                product_url: pLink,
-                                platform: 'Noon',
-                                last_updated: new Date().toISOString()
-                            });
-                        }
+                    results.noon.push({
+                        rank: results.noon.length + 1,
+                        product_id: hit.sku || 'NOON' + results.noon.length,
+                        name: fullTitle,
+                        brand: hit.brand || 'Noon',
+                        price: formattedPrice,
+                        currency: 'AED',
+                        condition: 'Refurbished',
+                        rating: hit.rating?.average || 'N/A',
+                        reviews: hit.rating?.count || '0',
+                        recent_sales: '', // API doesn't always expose this easily without deep dive, leaving empty
+                        image_url: image,
+                        product_url: pLink,
+                        platform: 'Noon',
+                        last_updated: new Date().toISOString()
                     });
-                } catch (e) {
-                    console.error("Noon JSON Parse Error:", e.message);
-                }
+                });
             } else {
-                console.log("   Noon: __NEXT_DATA__ script not found.");
+                console.warn("   Noon API returned unexpected structure:", Object.keys(noonResp.data));
             }
-            console.log(`   Fetched ${results.noon.length} Noon items.`);
 
         } catch (noonErr) {
             console.error("   Noon Scrape Failed:", noonErr.message);
         }
 
-        // --- FALLBACK / MOCK DATA (High-Quality Alignment with User Requirements) ---
         // --- FALLBACK / MOCK DATA (High-Quality Alignment with User Requirements) ---
         if (results.amazon.length === 0) {
             console.log("   ⚠️ Amazon Live Scrape Blocked/Empty. Using High-Fidelity Snapshot (Verified Dec 2025 Best Sellers).");
@@ -1141,18 +1139,11 @@ app.post('/api/fetch-market-trends', async (req, res) => {
         }
 
         if (results.noon.length === 0) {
-            console.log("   ⚠️ Noon Live Scrape Blocked. Using High-Fidelity Market Snapshot (Verified Dec 2025 Best Sellers).");
+            console.log("   ⚠️ Noon Live Scrape Blocked/Empty. Using High-Fidelity Market Snapshot.");
+            // Fallback kept for safety but should not trigger if API works
             results.noon = [
                 { rank: 1, product_id: 'NOON-IP15PM-TI', name: 'Apple Renewed - iPhone 15 Pro Max 256GB Natural Titanium', brand: 'Apple', price: 'AED 3,699', currency: 'AED', condition: 'Refurbished', rating: '4.9', reviews: '120', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1694685040/N53432545A_1.jpg', product_url: 'https://www.noon.com/uae-en/iphone-15-pro-max-256gb-natural-titanium/N53432545A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 2, product_id: 'NOON-S24U', name: 'Samsung Galaxy S24 Ultra AI Smartphone (Refurbished)', brand: 'Samsung', price: 'AED 3,123', currency: 'AED', condition: 'Refurbished', rating: '4.8', reviews: '60', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1705646128/N70034676V_1.jpg', product_url: 'https://www.noon.com/uae-en/galaxy-s24-ultra-256gb-titanium-grey/N70034676V/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 3, product_id: 'NOON-IP14PM-DP', name: 'Apple Renewed - iPhone 14 Pro Max 256GB Deep Purple 5G', brand: 'Apple', price: 'AED 1,890', currency: 'AED', condition: 'Refurbished', rating: '4.7', reviews: '340', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1662651478/N53346840A_1.jpg', product_url: 'https://www.noon.com/uae-en/iphone-14-pro-max-256gb-deep-purple/N53346840A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 4, product_id: 'NOON-S22U', name: 'Samsung Galaxy S22 Ultra 5G (Refurbished)', brand: 'Samsung', price: 'AED 1,849', currency: 'AED', condition: 'Refurbished', rating: '4.5', reviews: '560', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1644388657/N52587884A_1.jpg', product_url: 'https://www.noon.com/uae-en/samsung-galaxy-s22-ultra/N52587884A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 5, product_id: 'NOON-IP13PM', name: 'Apple Renewed - iPhone 13 Pro Max 256GB Sierra Blue 5G', brand: 'Apple', price: 'AED 2,599', currency: 'AED', condition: 'Refurbished', rating: '4.8', reviews: '810', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1631776100/N50106456A_1.jpg', product_url: 'https://www.noon.com/uae-en/iphone-13-pro-max-256gb-sierra-blue/N50106456A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 6, product_id: 'NOON-S23', name: 'Samsung Renewed - Galaxy S23 128GB Phantom Black', brand: 'Samsung', price: 'AED 1,249', currency: 'AED', condition: 'Refurbished', rating: '4.6', reviews: '120', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1675323212/N53375838A_1.jpg', product_url: 'https://www.noon.com/uae-en/galaxy-s23-128gb-phantom-black/N53375838A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 7, product_id: 'NOON-ZFLIP4', name: 'Samsung Galaxy Z Flip 4 (Refurbished)', brand: 'Samsung', price: 'AED 1,349', currency: 'AED', condition: 'Refurbished', rating: '4.4', reviews: '220', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1660117466/N53347502A_1.jpg', product_url: 'https://www.noon.com/uae-en/galaxy-z-flip-4/N53347502A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 8, product_id: 'NOON-NOTE20U', name: 'Samsung Galaxy Note 20 Ultra (Refurbished)', brand: 'Samsung', price: 'AED 1,149', currency: 'AED', condition: 'Refurbished', rating: '4.3', reviews: '1,500', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1605786419/N41926888A_1.jpg', product_url: 'https://www.noon.com/uae-en/galaxy-note-20-ultra-refurbished/N41926888A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 9, product_id: 'NOON-IP11', name: 'Apple Renewed - iPhone 11 128GB Black', brand: 'Apple', price: 'AED 1,099', currency: 'AED', condition: 'Refurbished', rating: '4.7', reviews: '3,200', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1610964177/N41441865A_1.jpg', product_url: 'https://www.noon.com/uae-en/iphone-11-renewed/N41441865A/p', platform: 'Noon', last_updated: new Date().toISOString() },
-                { rank: 10, product_id: 'NOON-S21U', name: 'Samsung Galaxy S21 Ultra 5G (Refurbished)', brand: 'Samsung', price: 'AED 999', currency: 'AED', condition: 'Refurbished', rating: '4.1', reviews: '980', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1610964177/N43241184A_1.jpg', product_url: 'https://www.noon.com/uae-en/samsung-galaxy-s21-ultra/N43241184A/p', platform: 'Noon', last_updated: new Date().toISOString() }
+                { rank: 2, product_id: 'NOON-S24U', name: 'Samsung Galaxy S24 Ultra AI Smartphone (Refurbished)', brand: 'Samsung', price: 'AED 3,123', currency: 'AED', condition: 'Refurbished', rating: '4.8', reviews: '60', image_url: 'https://f.nooncdn.com/products/tr:n-t_240/v1705646128/N70034676V_1.jpg', product_url: 'https://www.noon.com/uae-en/galaxy-s24-ultra-256gb-titanium-grey/N70034676V/p', platform: 'Noon', last_updated: new Date().toISOString() }
             ];
         }
 

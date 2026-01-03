@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIS Report</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="app-container">
+    <header>
+      <div class="header-top">
+        <div style="display:flex; flex-direction:column;">
+          <h1 style="margin-bottom:0;">MIS Overview</h1>
+          <span id="last-updated" style="font-size: 0.7rem; color: #6b7280;">Updated: --</span>
+        </div>
+        <div class="action-buttons">
+          <button id="quick-sync-btn" class="icon-btn" aria-label="Sync Now" title="Sync Data" style="color:#0ea5e9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 4v6h-6"></path>
+              <path d="M1 20v-6h6"></path>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+          <input type="file" id="file-upload" accept=".csv, .xlsx, .xls" style="display: none;" />
+          <button id="upload-btn" class="icon-btn" aria-label="Upload Data" title="Upload CSV">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </button>
+          <button id="download-btn" class="icon-btn" aria-label="Download CSV" title="Download CSV">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+              <text x="8" y="9" font-size="8" fill="white">CSV</text>
+            </svg>
+          </button>
+          <button id="download-xlsx-btn" class="icon-btn" aria-label="Download Excel" title="Download Excel"
+            style="color: #10b981;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" aria-label="Settings" title="API Settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+              </path>
+            </svg>
+          </button>
+          <button id="reset-btn" class="icon-btn" aria-label="Reset Data" title="Reset All Data">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"></path>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="controls-row">
+        <div class="date-toggle">
+          <button class="date-btn active" data-date="today">Today</button>
+          <button class="date-btn" data-date="yesterday">Yesterday</button>
+          <button class="date-btn" data-date="month">This Month</button>
+          <button class="date-btn" data-date="all">Last 365 Days</button>
+          <button class="date-btn" data-date="custom">Custom</button>
+        </div>
+        <div id="custom-date-inputs" class="custom-dates hidden"
+          style="display: none; margin-top: 5px; gap: 5px; justify-content: center;">
+          <input type="date" id="date-start" class="date-input"
+            style="padding: 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.8rem;">
+          <span style="font-size: 0.8rem; color: #666;">to</span>
+          <input type="date" id="date-end" class="date-input"
+            style="padding: 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.8rem;">
+        </div>
+        <div class="platform-tabs">
+          <button class="tab active" data-platform="all">All</button>
+          <button class="tab" data-platform="amazon">Amazon</button>
+          <button class="tab" data-platform="noon">Noon</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="stats-grid">
+        <div class="stat-card total-sales">
+          <div class="card-header">
+            <span class="card-title">Total Sales</span>
+            <span class="icon">💰</span>
+          </div>
+          <div class="card-value" id="sales-value">$0.00</div>
+          <div class="card-trend positive">
+            <span>+0.0%</span> vs yesterday
+          </div>
+        </div>
+
+        <div class="stat-card margin">
+          <div class="card-header">
+            <span class="card-title">Net Margin</span>
+            <span class="icon">📈</span>
+          </div>
+          <div class="card-value" id="margin-value">$0.00</div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" id="margin-bar" style="width: 0%"></div>
+          </div>
+          <div class="card-subtext" id="margin-percent">0% Margin</div>
+        </div>
+
+        <div class="stat-card costs">
+          <div class="card-header">
+            <span class="card-title">Total Cost</span>
+            <span class="icon">💸</span>
+          </div>
+          <div class="card-value" id="cost-value">$0.00</div>
+        </div>
+
+        <div class="stat-card fees">
+          <div class="card-header">
+            <span class="card-title">Mkt Fees</span>
+            <span class="icon">🧾</span>
+          </div>
+          <div class="card-value" id="fees-value">$0.00</div>
+        </div>
+
+        <div class="stat-card returns">
+          <div class="card-header">
+            <span class="card-title">Returns</span>
+            <span class="icon">↩️</span>
+          </div>
+          <div class="card-value" id="returns-value">$0.00</div>
+        </div>
+
+        <div class="stat-card products">
+          <div class="card-header">
+            <span class="card-title">Inventory & Sales</span>
+            <span class="icon">📦</span>
+          </div>
+          <div class="product-stats">
+            <div class="stat-row">
+              <span class="label">Units Sold</span>
+              <span class="value" id="sold-count">0</span>
+            </div>
+            <div class="stat-row">
+              <span class="label">Live SKUs</span>
+              <span class="value" id="live-sku-count">0</span>
+            </div>
+            <div class="stat-row">
+              <span class="label">Total SKUs</span>
+              <span class="value" id="total-sku-count">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-section">
+        <h3>Weekly Performance</h3>
+        <div class="bar-chart" id="weekly-chart">
+          <!-- Bars will be injected by JS -->
+        </div>
+      </div>
+
+      <div class="recent-section" style="margin-top: 15px;">
+        <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Recent Orders</h3>
+        <div id="recent-orders-list"
+          style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto;">
+          <!-- Order Cards Injected Here -->
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <button id="exploreBtn" class="explore-btn">
+        Explore Dashboard
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="8" y1="12" x2="8" y2="16"></line>
+          <line x1="12" y1="16" x2="12" y2="16"></line>
+          <line x1="16" y1="8" x2="16" y2="16"></line>
+        </svg>
+      </button>
+      <button id="trendsBtn" class="explore-btn"
+        style="margin-top: 5px; background: white; color: #43B02A; border: 1px solid #43B02A;">
+        Market Trends
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 6l-9.5 9.5-5-5L1 18"></path>
+          <path d="M17 6h6v6"></path>
+        </svg>
+      </button>
+      <div style="text-align: center; margin-top: 10px;">
+        <a href="#" id="resetBtn" style="color: #9aa0a6; font-size: 0.8rem; text-decoration: none;">Reset Data &
+          Resync</a>
+      </div>
+    </footer>
+  </div>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>API Integrations</h2>
+        <button id="close-settings" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>Amazon Refresh Token (Atzr|...)</label>
+        <textarea id="amazon-token" class="input-area" placeholder="Paste your Refresh Token here"></textarea>
+
+        <div class="input-group">
+          <label>Client ID</label>
+          <input type="text" id="client-id" class="input-field" placeholder="amzn.mws..." />
+        </div>
+
+        <div class="input-group">
+          <label>Amazon Marketplace</label>
+          <select id="marketplace-select" class="input-field">
+            <option value="A2VIGQ35RCS4UG">UAE (Amazon.ae)</option>
+            <option value="A17E79C6D8DWNP">Saudi Arabia (Amazon.sa)</option>
+            <option value="ARBP9OOSHTCHU">Egypt (Amazon.eg)</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <label>Client Secret</label>
+          <input type="password" id="client-secret" class="input-field" placeholder="Client Secret Key" />
+        </div>
+
+        <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+        <h3 style="font-size: 1rem; margin-bottom: 10px; color: #333;">Noon Integration</h3>
+        <div class="input-group">
+          <label>Business ID</label>
+          <input type="text" id="noon-business-id" class="input-field" placeholder="e.g. p123456 (Project Code)" />
+        </div>
+        <div class="input-group">
+          <label>Application Key (or Token)</label>
+          <input type="text" id="noon-app-key" class="input-field" placeholder="Key ID..." />
+        </div>
+        <div class="input-group">
+          <label>Authorization Token (API Key)</label>
+          <input type="password" id="noon-auth-token" class="input-field" placeholder="Private Key (long string)..." />
+        </div>
+
+        <div class="modal-footer"
+          style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px; padding-bottom: 20px;">
+          <button id="save-settings-btn" class="primary-btn" style="padding: 10px;">Save Credentials</button>
+          <button id="test-api-btn" class="secondary-btn"
+            style="background: #2563eb; color: white; border: none; padding: 10px; border-radius: 0.5rem; cursor: pointer; font-weight: bold;">
+            Sync Live Data from Server 🚀
+          </button>
+        </div>
+        <p class="crypto-note">Data saved locally. We never see your keys.</p>
+        <div id="api-status" style="font-size: 0.75rem; text-align: center; margin-top: 5px; color: #6b7280;"></div>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+
+</html>
