@@ -1344,10 +1344,10 @@ document.addEventListener('DOMContentLoaded', () => {
             nToken = result.noonToken;
         }
 
-        // 2. Generate 14 Chunks (Last 14 Months to safely cover 365+ days)
+        // 2. Generate 15 Chunks (Last 15 Months to safely cover 365+ days + buffer)
         const chunks = [];
         const now = new Date();
-        for (let i = 0; i < 14; i++) {
+        for (let i = 0; i < 15; i++) {
             // NEW LOGIC: Precise Month Ranges
             const tempDate = new Date(now);
             tempDate.setDate(1);
@@ -1375,55 +1375,60 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 3. Process Chunks
         for (const [idx, chunk] of chunks.entries()) {
-            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/14... (${chunk.start.toLocaleDateString()})`;
+            const monthName = chunk.start.toLocaleString('default', { month: 'short', year: 'numeric' });
+            if (statusEl) statusEl.textContent = `Syncing ${monthName} (${idx + 1}/15)...`;
 
             // Amazon
             if (token) {
-                try {
-                    const amzRes = await fetch(`${BASE_URL}/api/fetch-sales`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId,
-                            customStartDate: chunk.start.toISOString(),
-                            customEndDate: idx === 0 ? null : chunk.end.toISOString()
-                        })
-                    }).then(r => r.json());
+                let attempts = 0;
+                let success = false;
+                while (attempts < 2 && !success) { // Simple Retry
+                    attempts++;
+                    try {
+                        const amzRes = await fetch(`${BASE_URL}/api/fetch-sales`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                refreshToken: token, clientId: cid, clientSecret: sec, marketplaceId: mpId,
+                                customStartDate: chunk.start.toISOString(),
+                                customEndDate: idx === 0 ? null : chunk.end.toISOString()
+                            })
+                        }).then(r => r.json());
 
-                    if (amzRes.success && amzRes.data && amzRes.data.ordersList) {
-                        const chunkOrders = amzRes.data.ordersList;
-                        amazonSuccess = true;
+                        if (amzRes.success && amzRes.data && amzRes.data.ordersList) {
+                            const chunkOrders = amzRes.data.ordersList;
+                            amazonSuccess = true;
 
-                        console.log(`CHUNK ${idx + 1}: Received ${chunkOrders.length} Amazon orders.`);
-                        if (chunkOrders.length > 0) {
-                            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/12... Found ${chunkOrders.length} orders`;
-                        }
+                            console.log(`CHUNK ${idx + 1}: Received ${chunkOrders.length} Amazon orders.`);
+                            if (statusEl) statusEl.textContent = `Syncing ${monthName}... Found ${chunkOrders.length} orders`;
+                            success = true; // Mark as success to exit retry loop
 
-                        // Smart Merge: Remove overlapping orders in this range from local
-                        rawData.detailedOrders = rawData.detailedOrders.filter(o =>
-                            o.platform !== 'Amazon' ||
-                            new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
-                        );
-                        chunkOrders.forEach(order => {
-                            rawData.detailedOrders.push({
-                                id: order.id, date: order.date, platform: 'Amazon',
-                                amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
-                                status: order.status, currency: order.currency,
-                                feeType: order.feeType, feeError: order.feeError,
-                                invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                            // Smart Merge: Remove overlapping orders in this range from local
+                            rawData.detailedOrders = rawData.detailedOrders.filter(o =>
+                                o.platform !== 'Amazon' ||
+                                new Date(o.date) < chunk.start || new Date(o.date) > chunk.end
+                            );
+                            chunkOrders.forEach(order => {
+                                rawData.detailedOrders.push({
+                                    id: order.id, date: order.date, platform: 'Amazon',
+                                    amount: order.amount, fees: order.fees || 0, cost: order.cost || 0,
+                                    status: order.status, currency: order.currency,
+                                    feeType: order.feeType, feeError: order.feeError,
+                                    invoiceRef: order.invoiceRef, units: order.units, skus: order.skus
+                                });
                             });
-                        });
-                    } else {
-                        console.warn(`CHUNK ${idx + 1}: Amazon success=false or no data`, amzRes);
-                        if (amzRes && amzRes.error && idx === 0 && !amzRes.error.includes('429')) {
-                            // Only alert on critical errors, ignore Rate Limits (429) as we continue syncing other chunks
-                            // We also rely on the server logs for 429 details
-                            alert(`Amazon Sync Error: ${amzRes.error}`);
+                        } else {
+                            console.warn(`CHUNK ${idx + 1}: Amazon success=false or no data`, amzRes);
+                            if (amzRes && amzRes.error && idx === 0 && !amzRes.error.includes('429')) {
+                                // Only alert on critical errors
+                            }
                         }
+                    } catch (e) {
+                        console.warn(`Amazon Chunk ${idx} failed (Attempt ${attempts})`, e);
+                        if (statusEl) statusEl.textContent = `Error in ${monthName}, retrying...`;
+                        await new Promise(r => setTimeout(r, 2000)); // Wait before retry
                     }
-                } catch (e) {
-                    console.warn(`Amazon Chunk ${idx} failed`, e);
-                }
+                } // End Retry Loop
             }
 
             // Noon
@@ -1465,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
             saveData();
 
             // Delay to be gentle (Increased to prevent 429 Rate Limits)
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 4000));
         }
 
         // Final Deduplication and Save
@@ -1481,8 +1486,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Final Feedback
         let syncMessages = [];
-        if (amazonSuccess) syncMessages.push("✅ Amazon Synced (14 Months)");
-        if (noonSuccess) syncMessages.push("✅ Noon Synced (14 Months)");
+        if (amazonSuccess) syncMessages.push("✅ Amazon Synced (15 Months)");
+        if (noonSuccess) syncMessages.push("✅ Noon Synced (15 Months)");
         if (!amazonSuccess && !noonSuccess) syncMessages.push("❌ Sync Failed (Check Credentials)");
 
         if (lastUpEl) lastUpEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
