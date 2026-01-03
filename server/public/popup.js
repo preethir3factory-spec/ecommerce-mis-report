@@ -1344,10 +1344,10 @@ document.addEventListener('DOMContentLoaded', () => {
             nToken = result.noonToken;
         }
 
-        // 2. Generate 12 Chunks (Last 12 Months)
+        // 2. Generate 14 Chunks (Last 14 Months to safely cover 365+ days)
         const chunks = [];
         const now = new Date();
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 14; i++) {
             // NEW LOGIC: Precise Month Ranges
             const tempDate = new Date(now);
             tempDate.setDate(1);
@@ -1375,7 +1375,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 3. Process Chunks
         for (const [idx, chunk] of chunks.entries()) {
-            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/12... (${chunk.start.toLocaleDateString()})`;
+            if (statusEl) statusEl.textContent = `Syncing Month ${idx + 1}/14... (${chunk.start.toLocaleDateString()})`;
 
             // Amazon
             if (token) {
@@ -1461,8 +1461,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            // Save Progress Iteratively
+            saveData();
+
             // Delay to be gentle (Increased to prevent 429 Rate Limits)
-            await new Promise(r => setTimeout(r, 2500));
+            await new Promise(r => setTimeout(r, 2000));
         }
 
         // Final Deduplication and Save
@@ -1478,8 +1481,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Final Feedback
         let syncMessages = [];
-        if (amazonSuccess) syncMessages.push("✅ Amazon Synced (12 Months)");
-        if (noonSuccess) syncMessages.push("✅ Noon Synced (12 Months)");
+        if (amazonSuccess) syncMessages.push("✅ Amazon Synced (14 Months)");
+        if (noonSuccess) syncMessages.push("✅ Noon Synced (14 Months)");
         if (!amazonSuccess && !noonSuccess) syncMessages.push("❌ Sync Failed (Check Credentials)");
 
         if (lastUpEl) lastUpEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
