@@ -1379,7 +1379,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (statusEl) statusEl.textContent = `Syncing ${monthName} (${idx + 1}/15)...`;
 
             // Amazon
-            if (token) {
+            // Allow sync if token exists locally OR if we are on the Web Dashboard (where token might be null but server has Env Vars)
+            // We pass the potentially null token to the server.
+            if (true) {
                 let attempts = 0;
                 let success = false;
                 while (attempts < 2 && !success) { // Simple Retry
@@ -1432,7 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Noon
-            if (nBiz && nKey && nToken) {
+            if (true) { // Always attempt Noon sync (Server handles fallback)
                 try {
                     const noonRes = await fetch(`${BASE_URL}/api/fetch-noon-sales`, {
                         method: 'POST',
