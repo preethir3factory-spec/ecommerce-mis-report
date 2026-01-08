@@ -1,0 +1,38 @@
+[
+    {
+        "order_id": "8438055663",
+        "order_item_ids": [
+            "122079013"
+        ],
+        "order_status": "shipped",
+        "order_date": "2025-01-05T10:30:00Z",
+        "total_amount": 3123.00,
+        "currency_code": "AED",
+        "items": [
+            {
+                "sku": "NOON-S24U",
+                "name": "Samsung Galaxy S24 Ultra",
+                "unit_price": 3123.00,
+                "quantity": 1
+            }
+        ]
+    },
+    {
+        "order_id": "6684948811",
+        "order_item_ids": [
+            "2299833"
+        ],
+        "order_status": "delivered",
+        "order_date": "2025-01-04T15:45:00Z",
+        "total_amount": 149.00,
+        "currency_code": "AED",
+        "items": [
+            {
+                "sku": "NOON-CASE-IP15",
+                "name": "iPhone 15 Case",
+                "unit_price": 149.00,
+                "quantity": 1
+            }
+        ]
+    }
+]

@@ -1,0 +1,36 @@
+﻿=== NOON API DIAGNOSTIC SCRIPT ===
+Starting 5 tests...
+
+≡ƒº¬ Test: Direct API | Clean ID
+   URL: https://api.noon.partners/order/v1/orders?limit=1&status=created
+   PartnerID: 47635
+   Γ¥î Failed: Request failed with status code 418
+   Status: 418
+   Body: "fault filter abort"
+
+≡ƒº¬ Test: Gateway | Clean ID
+   URL: https://noon-api-gateway.noon.partners/order/v1/orders?limit=1&status=created
+   PartnerID: 47635
+   Γ¥î Failed: Request failed with status code 404
+   Status: 404
+   Body: ""
+
+≡ƒº¬ Test: Direct API | 'p' ID
+   URL: https://api.noon.partners/order/v1/orders?limit=1&status=created
+   PartnerID: p47635
+   Γ¥î Failed: Request failed with status code 418
+   Status: 418
+   Body: "fault filter abort"
+
+≡ƒº¬ Test: Gateway | 'p' ID
+   URL: https://noon-api-gateway.noon.partners/order/v1/orders?limit=1&status=created
+   PartnerID: p47635
+   Γ¥î Failed: Request failed with status code 404
+   Status: 404
+   Body: ""
+
+≡ƒº¬ Test: Gateway | FBPI Order List
+   URL: https://noon-api-gateway.noon.partners/fbpi/v1/order/list?limit=1
+   PartnerID: 47635
+   Γ£à SUCCESS! Status: 200
+   Preview: "<!DOCTYPE html><html lang=\"en\" dir=\"ltr\"><hea

@@ -5,13 +5,18 @@ const { wrapper } = require("axios-cookiejar-support");
 const { CookieJar } = require("tough-cookie");
 
 (async () => {
-    // Load credentials (prefer sensitive file if exists)
-    const credsFile = fs.existsSync("noon_credentials_sensitive.json")
-        ? "noon_credentials_sensitive.json"
-        : "noon_credentials.json";
+    // Load credentials (prefer config file first)
+    let credsFile;
+    if (fs.existsSync("noon_config.json")) {
+        credsFile = "noon_config.json";
+    } else if (fs.existsSync("noon_credentials_sensitive.json")) {
+        credsFile = "noon_credentials_sensitive.json";
+    } else {
+        credsFile = "noon_credentials.json";
+    }
 
     if (!fs.existsSync(credsFile)) {
-        console.error(`❌ Error: Neither 'noon_credentials_sensitive.json' nor 'noon_credentials.json' found.`);
+        console.error(`❌ Error: No credential file found (checked noon_config.json, noon_credentials_sensitive.json, noon_credentials.json).`);
         process.exit(1);
     }
 
