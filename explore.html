@@ -204,6 +204,16 @@
                 <button class="filter-btn" data-range="365days">Last 365 Days</button>
             </div>
 
+            <div style="margin-left: 15px; display:flex; align-items:center; gap:8px;">
+                <span style="font-weight:500; font-size:0.9rem; color: var(--text-color);">Platform:</span>
+                <select id="platform-filter"
+                    style="padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; background: transparent; color: var(--text-color); cursor: pointer;">
+                    <option value="all">All Platforms</option>
+                    <option value="Amazon">Amazon</option>
+                    <option value="Noon">Noon</option>
+                </select>
+            </div>
+
             <div class="custom-date-group"
                 style="display: flex; gap: 8px; align-items: center; margin-left: auto; margin-right: auto;">
                 <input type="date" id="start-date" style="padding: 8px; border: 1px solid #ccc; border-radius: 6px;">

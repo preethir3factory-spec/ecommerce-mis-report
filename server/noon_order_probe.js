@@ -48,7 +48,7 @@ const { randomUUID } = require("crypto");
 
 
         const whoamiResp = await axios.get(
-            "https://api.noon.partners/whoami",
+            "https://noon-api-gateway.noon.partners/identity/v1/whoami",
             {
                 headers: {
                     ...commonHeaders,
@@ -68,7 +68,7 @@ const { randomUUID } = require("crypto");
         console.log("📦 Fetching Orders...");
 
         const ordersResp = await axios.get(
-            "https://api.noon.partners/order/v1/orders?updatedSince=2024-01-01T00:00:00Z",
+            "https://noon-api-gateway.noon.partners/fbpi/v1/orders?updatedSince=2024-01-01T00:00:00Z",
             {
                 headers: {
                     ...commonHeaders,

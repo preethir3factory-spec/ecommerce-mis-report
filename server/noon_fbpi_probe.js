@@ -8,7 +8,7 @@ const creds = JSON.parse(fs.readFileSync('noon_credentials_sensitive.json', 'utf
 // Config
 // Config
 const baseUrls = [
-    'https://api.noon.partners'
+    'https://noon-api-gateway.noon.partners'
 ];
 
 const paths = [

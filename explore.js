@@ -3,10 +3,13 @@ let fullOrders = [];
 let currentFilteredOrders = [];
 let currentPage = 1;
 const itemsPerPage = 50;
+let currentRange = 'all';
+let currentPlatform = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
     // Buttons
     const filterBtns = document.querySelectorAll('.filter-btn[data-range]');
+    const platformSelect = document.getElementById('platform-filter');
     const customApply = document.getElementById('custom-apply-btn');
     const downloadBtn = document.getElementById('download-csv-btn');
 
@@ -18,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('data-status').textContent = `Last Updated: ${formatDate(result.misData.lastUpdated)}`;
 
                 // Initial Render (All Time)
-                applyFilter('all');
+                applyFilters();
             } else {
                 document.getElementById('data-status').textContent = 'No Data Found.';
             }
@@ -27,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('data-status').textContent = 'Dev Mode (No Chrome Storage)';
     }
 
-    // Filter Listeners
+    // Filter Listeners (Date)
     filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             // UI Toggle
@@ -35,16 +38,25 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
 
             // Logic
-            applyFilter(btn.getAttribute('data-range'));
+            currentRange = btn.getAttribute('data-range');
+            applyFilters();
         });
     });
 
+    // Platform Listener
+    if (platformSelect) {
+        platformSelect.addEventListener('change', () => {
+            currentPlatform = platformSelect.value;
+            applyFilters();
+        });
+    }
+
     // Custom Date Listener
     customApply.addEventListener('click', () => {
-        applyFilter('custom');
+        currentRange = 'custom';
+        applyFilters();
     });
 
-    // Download Listener
     // Download Listener
     downloadBtn.addEventListener('click', downloadCSV);
 
@@ -65,9 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Filter Logic matches user request (Today, Yesterday, 30, 365)
-// Filter Logic matches user request (Today, Yesterday, 30, 365)
-function applyFilter(range) {
+// Unified Filter Logic
+function applyFilters() {
     const now = new Date();
 
     // Normalize "Today" to Local 00:00:00
@@ -82,52 +93,50 @@ function applyFilter(range) {
     const yestEnd = new Date(yestStart);
     yestEnd.setHours(23, 59, 59, 999);
 
-    let filtered = [];
+    let filtered = fullOrders;
 
-    if (range === 'all') {
-        filtered = fullOrders;
-    }
-    else if (range === 'today') {
-        filtered = fullOrders.filter(o => {
+    // 1. Date Filter
+    if (currentRange === 'today') {
+        filtered = filtered.filter(o => {
             if (!o.date) return false;
             const d = new Date(o.date);
             return d >= todayStart && d <= todayEnd;
         });
     }
-    else if (range === 'yesterday') {
-        filtered = fullOrders.filter(o => {
+    else if (currentRange === 'yesterday') {
+        filtered = filtered.filter(o => {
             if (!o.date) return false;
             const d = new Date(o.date);
             return d >= yestStart && d <= yestEnd;
         });
     }
-    else if (range === '30days') {
+    else if (currentRange === '30days') {
         const threshold = new Date(now);
         threshold.setDate(threshold.getDate() - 30);
         threshold.setHours(0, 0, 0, 0);
         const endRange = new Date(now);
         endRange.setHours(23, 59, 59, 999);
 
-        filtered = fullOrders.filter(o => {
+        filtered = filtered.filter(o => {
             if (!o.date) return false;
             const d = new Date(o.date);
             return d >= threshold && d <= endRange;
         });
     }
-    else if (range === '365days') {
+    else if (currentRange === '365days') {
         const threshold = new Date(now);
         threshold.setFullYear(threshold.getFullYear() - 1); // Use FullYear to match Popup
         threshold.setHours(0, 0, 0, 0); // Include full start day
         const endRange = new Date(now);
         endRange.setHours(23, 59, 59, 999);
 
-        filtered = fullOrders.filter(o => {
+        filtered = filtered.filter(o => {
             if (!o.date) return false;
             const d = new Date(o.date);
             return d >= threshold && d <= endRange;
         });
     }
-    else if (range === 'custom') {
+    else if (currentRange === 'custom') {
         const startVal = document.getElementById('start-date').value;
         const endVal = document.getElementById('end-date').value;
         if (!startVal || !endVal) {
@@ -138,10 +147,15 @@ function applyFilter(range) {
         const start = new Date(startVal); start.setHours(0, 0, 0, 0);
         const end = new Date(endVal); end.setHours(23, 59, 59, 999);
 
-        filtered = fullOrders.filter(o => {
+        filtered = filtered.filter(o => {
             const d = new Date(o.date);
             return d >= start && d <= end;
         });
+    }
+
+    // 2. Platform Filter
+    if (currentPlatform !== 'all') {
+        filtered = filtered.filter(o => (o.platform || 'Amazon') === currentPlatform);
     }
 
     currentFilteredOrders = filtered;

@@ -1211,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noonKeyInput = document.getElementById('noon-app-key');
     const noonTokenInput = document.getElementById('noon-auth-token');
 
-    // Load Settings
+    // Settings Button: Open Modal & Load Data
     if (settingsBtn) {
         settingsBtn.addEventListener('click', () => {
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -1228,6 +1228,37 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             apiStatusDiv.textContent = '';
             settingsModal.classList.remove('hidden');
+        });
+    }
+
+    // Reset Button: Clear Data
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
+                    chrome.storage.local.clear(() => {
+                        alert('All data has been reset.');
+                        location.reload();
+                    });
+                }
+            } else {
+                alert('Reset functionality requires Chrome Extension environment.');
+            }
+        });
+    }
+
+    // Navigation Buttons
+    const trendsBtn = document.getElementById('trendsBtn');
+    if (trendsBtn) {
+        trendsBtn.addEventListener('click', () => {
+            chrome.tabs.create({ url: chrome.runtime.getURL('market_trends.html') });
+        });
+    }
+
+    const liveSkusBtn = document.getElementById('liveSkusBtn');
+    if (liveSkusBtn) {
+        liveSkusBtn.addEventListener('click', () => {
+            chrome.tabs.create({ url: chrome.runtime.getURL('sku_list.html') });
         });
     }
 
@@ -1387,7 +1418,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Noon
-            if (nBiz && nKey && nToken) {
+            // Noon (Server has logic to use noon_config.json if keys missing here)
+            // We attempt sync regardless of frontend inputs
+            if (true) {
+                const hasNoonInputs = (nBiz && nKey && nToken);
                 try {
                     const noonRes = await fetch(`${BASE_URL}/api/fetch-noon-sales`, {
                         method: 'POST',
@@ -1684,33 +1718,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (exploreBtn) {
         exploreBtn.addEventListener('click', () => {
             if (typeof chrome !== 'undefined' && chrome.tabs) {
-                chrome.tabs.create({ url: 'explore.html' });
+                chrome.tabs.create({ url: chrome.runtime.getURL('explore.html') });
             } else {
                 window.open('explore.html', '_blank');
-            }
-        });
-    }
-
-    // Market Trends Button
-    const trendsBtn = document.getElementById('trendsBtn');
-    if (trendsBtn) {
-        trendsBtn.addEventListener('click', () => {
-            if (typeof chrome !== 'undefined' && chrome.tabs) {
-                chrome.tabs.create({ url: 'market_trends.html' });
-            } else {
-                window.open('market_trends.html', '_blank');
-            }
-        });
-    }
-
-    // Reset Data Listener
-    if (resetBtn) {
-        resetBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (confirm('This will purge all saved data and force a full re-sync. Proceed?')) {
-                chrome.storage.local.clear(() => {
-                    location.reload();
-                });
             }
         });
     }

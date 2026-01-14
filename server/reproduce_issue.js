@@ -50,8 +50,9 @@ try {
     console.log("✅ JWT Generated successfully.");
 
     // 2. Execute API Request
-    // URL taken from "Make Your First API Call" guide
-    const url = 'https://api.noon.partners/order/v1/orders';
+    // 2. Execute API Request
+    // URL updated to correct gateway
+    const url = 'https://noon-api-gateway.noon.partners/fbpi/v1/orders';
 
     console.log(`\n📡 Sending GET request to: ${url}`);
 
@@ -60,7 +61,7 @@ try {
             const response = await axios.get(url, {
                 params: {
                     limit: 1,
-                    status: 'created'
+                    status: 'created' // FBPI might use different status or NO query params for webhooks only?
                 },
                 headers: {
                     "Authorization": `Bearer ${token}`,

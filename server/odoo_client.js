@@ -301,6 +301,60 @@ class OdooClient {
             });
         });
     }
+
+    async fetchSalesOrdersByPartner(partnerName, limit = 50) {
+        if (!this.uid) await this.connect();
+
+        // 1. Get Partner ID
+        let partnerId = await this.fetchPartnerId(partnerName);
+        if (!partnerId) {
+            console.warn(`⚠️ Partner '${partnerName}' not found.`);
+            return [];
+        }
+
+        const client = this.rpcConfig.secure
+            ? xmlrpc.createSecureClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' })
+            : xmlrpc.createClient({ ...this.rpcConfig, path: '/xmlrpc/2/object' });
+
+        return new Promise((resolve, reject) => {
+            // 2. Search Sale Orders
+            const domain = [['partner_id', '=', partnerId]];
+
+            client.methodCall('execute_kw', [this.db, this.uid, this.password, 'sale.order', 'search_read', [domain],
+            {
+                fields: ['name', 'date_order', 'amount_total', 'client_order_ref', 'state', 'order_line'],
+                limit: limit,
+                order: 'date_order desc'
+            }], (err, orders) => {
+                if (err) { console.error("SO Fetch Error:", err); resolve([]); return; }
+                if (!orders || orders.length === 0) { resolve([]); return; }
+
+                // 3. Fetch Order Lines
+                const allLineIds = orders.flatMap(o => o.order_line || []);
+                if (allLineIds.length === 0) { resolve(orders); return; }
+
+                client.methodCall('execute_kw', [this.db, this.uid, this.password, 'sale.order.line', 'read', [allLineIds],
+                { fields: ['product_id', 'price_unit', 'product_uom_qty', 'name', 'order_id'] }], (err2, lines) => {
+                    if (err2) { console.error("SO Line Error:", err2); resolve(orders); return; }
+
+                    // Attach lines to orders
+                    const lineMap = {};
+                    lines.forEach(l => {
+                        const orderId = l.order_id ? l.order_id[0] : null;
+                        if (orderId) {
+                            if (!lineMap[orderId]) lineMap[orderId] = [];
+                            lineMap[orderId].push(l);
+                        }
+                    });
+
+                    orders.forEach(o => {
+                        o.lines_details = lineMap[o.id] || [];
+                    });
+                    resolve(orders);
+                });
+            });
+        });
+    }
 }
 
 module.exports = new OdooClient();
